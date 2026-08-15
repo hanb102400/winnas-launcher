@@ -10,14 +10,14 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use tauri::Emitter;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
     GetAsyncKeyState, VK_CONTROL, VK_D, VK_ESCAPE, VK_F4, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
-    VK_TAB, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
+    VK_SLEEP, VK_TAB, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, TranslateMessage, KBDLLHOOKSTRUCT,
     SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, MSG,
 };
 
-use super::{log, state, volume};
+use super::{log, state, system, volume};
 
 const WM_KEYDOWN: u32 = 0x0100;
 const WM_SYSKEYDOWN: u32 = 0x0104;
@@ -29,11 +29,12 @@ fn is_down(vk: u16) -> bool {
 /// 拦截判定纯函数：输入 (按键 vk + 各修饰键状态) -> 应拦截的组合名。
 /// 与 `GetAsyncKeyState` 解耦，便于单测（PoC2 已验证）。
 fn classify(vk: u16, win: bool, alt: bool, ctrl: bool, shift: bool) -> Option<&'static str> {
-    // 音量键优先（不依赖修饰键，吞掉避免系统重复调整）
+    // 音量键 / 睡眠键优先（不依赖修饰键，吞掉避免系统重复处理）
     match vk {
         _ if vk == VK_VOLUME_UP.0 => return Some("VOL_UP"),
         _ if vk == VK_VOLUME_DOWN.0 => return Some("VOL_DOWN"),
         _ if vk == VK_VOLUME_MUTE.0 => return Some("VOL_MUTE"),
+        _ if vk == VK_SLEEP.0 => return Some("SLEEP"),
         _ => {}
     }
     if win {
@@ -86,6 +87,11 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                     "VOL_MUTE" => {
                         volume::toggle_mute();
                         emit_volume_changed();
+                    }
+                    "SLEEP" => {
+                        // 遥控器电源键 → S3 睡眠（而非关机），吞掉系统默认行为
+                        eprintln!("[keyhook] 电源键 → S3 睡眠");
+                        system::sleep();
                     }
                     // 回调内只做轻量输出，禁止写文件/flush（会阻塞钩子线程导致按键丢失）
                     _ => eprintln!("[keyhook] INTERCEPT {name}"),
