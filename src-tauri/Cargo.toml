@@ -1,6 +1,6 @@
 [package]
 name = "winnas-launcher"
-version = "0.1.0"
+version = "0.1.1"
 description = "WinNas Launcher - TV launcher for Windows"
 authors = ["hanb"]
 edition = "2021"

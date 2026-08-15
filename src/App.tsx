@@ -46,7 +46,6 @@ function App() {
   const [osdVisible, setOsdVisible] = useState(false);
   const [systemAction, setSystemAction] = useState<string | null>(null);
   const [showKeymap, setShowKeymap] = useState(false);
-  const [maintenance, setMaintenance] = useState(false);
   const [settingsFocus, setSettingsFocus] = useState(0); // 设置抽屉内焦点索引
   const [clock, setClock] = useState(() => new Date());
   const [firstRun, setFirstRun] = useState(false); // 首次启动引导
@@ -121,20 +120,6 @@ function App() {
     setConfirmExit(true);
     setConfirmFocus(0);
   }, []);
-
-  // 进入/退出维护模式
-  const toggleMaintenance = useCallback(async () => {
-    if (maintenance) {
-      await invoke("exit_maintenance");
-      setMaintenance(false);
-      setToast("已退出维护模式");
-    } else {
-      await invoke("enter_maintenance");
-      setMaintenance(true);
-      setToast("已进入维护模式（任务栏已恢复，可调试桌面）");
-    }
-    setSettingsOpen(false);
-  }, [maintenance]);
 
   const toggleAutostart = useCallback(async () => {
     const next = !autostart;
@@ -224,31 +209,25 @@ function App() {
           setShowKeymap(true);
           break;
         case 5:
-          setSystemAction("shutdown");
-          break;
-        case 6:
           setSystemAction("reboot");
           break;
-        case 7:
+        case 6:
           setSystemAction("sleep");
           break;
-        case 8:
+        case 7:
           setSystemAction("lock");
           break;
-        case 9:
-          toggleMaintenance();
-          break;
-        case 10:
+        case 8:
           setSettingsOpen(false);
           setConfirmExit(true);
           setConfirmFocus(0);
           break;
-        case 11:
+        case 9:
           setSettingsOpen(false);
           break;
       }
     },
-    [restoreDesktop, clearMenuCache, toggleAutostart, openAddApp, toggleMaintenance],
+    [restoreDesktop, clearMenuCache, toggleAutostart, openAddApp],
   );
 
   // 确认系统操作
@@ -367,7 +346,7 @@ function App() {
       if (settingsOpen) {
         switch (e.key) {
           case "ArrowDown":
-            setSettingsFocus((f) => Math.min(f + 1, 11));
+            setSettingsFocus((f) => Math.min(f + 1, 9));
             break;
           case "ArrowUp":
             setSettingsFocus((f) => Math.max(f - 1, 0));
@@ -635,54 +614,40 @@ function App() {
           </button>
           <button
             className={`drawer-item ${settingsFocus === 5 ? "focused" : ""}`}
-            onClick={() => setSystemAction("shutdown")}
-            onMouseEnter={() => setSettingsFocus(5)}
-          >
-            ⏻ 关机
-          </button>
-          <button
-            className={`drawer-item ${settingsFocus === 6 ? "focused" : ""}`}
             onClick={() => setSystemAction("reboot")}
-            onMouseEnter={() => setSettingsFocus(6)}
+            onMouseEnter={() => setSettingsFocus(5)}
           >
             🔄 重启
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 7 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 6 ? "focused" : ""}`}
             onClick={() => setSystemAction("sleep")}
-            onMouseEnter={() => setSettingsFocus(7)}
+            onMouseEnter={() => setSettingsFocus(6)}
           >
             💤 睡眠
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 8 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 7 ? "focused" : ""}`}
             onClick={() => setSystemAction("lock")}
-            onMouseEnter={() => setSettingsFocus(8)}
+            onMouseEnter={() => setSettingsFocus(7)}
           >
             🔒 锁屏
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 9 ? "focused" : ""}`}
-            onClick={toggleMaintenance}
-            onMouseEnter={() => setSettingsFocus(9)}
-          >
-            {maintenance ? "🔧 退出维护模式" : "🔧 进入维护模式"}
-          </button>
-          <button
-            className={`drawer-item ${settingsFocus === 10 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 8 ? "focused" : ""}`}
             onClick={() => {
               setSettingsOpen(false);
               setConfirmExit(true);
               setConfirmFocus(0);
             }}
-            onMouseEnter={() => setSettingsFocus(10)}
+            onMouseEnter={() => setSettingsFocus(8)}
           >
             🚪 退出 Launcher
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 11 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 9 ? "focused" : ""}`}
             onClick={() => setSettingsOpen(false)}
-            onMouseEnter={() => setSettingsFocus(11)}
+            onMouseEnter={() => setSettingsFocus(9)}
           >
             ← 返回
           </button>
