@@ -41,7 +41,7 @@ function App() {
   const [toast, setToast] = useState("");
   const [autostart, setAutostart] = useState(false);
   const [confirmExit, setConfirmExit] = useState(false);
-  const [confirmFocus, setConfirmFocus] = useState(0); // 0=确认退出 1=取消
+  const [confirmFocus, setConfirmFocus] = useState(0); // 0=确认 1=取消（退出/系统操作确认框共用）
   const [gearFocused, setGearFocused] = useState(false);
   const [volume, setVolume] = useState(0);
   const [osdVisible, setOsdVisible] = useState(false);
@@ -77,6 +77,11 @@ function App() {
   const row = Math.floor(inPage / COLS);
   const col = inPage % COLS;
   const pageApps = apps.slice(pageIndex * PAGE_SIZE, (pageIndex + 1) * PAGE_SIZE);
+
+  // 系统操作确认框打开时，焦点重置到「确认」
+  useEffect(() => {
+    if (systemAction) setConfirmFocus(0);
+  }, [systemAction]);
 
   // 时钟
   useEffect(() => {
@@ -454,11 +459,21 @@ function App() {
         return;
       }
 
-      // 系统操作确认框：Enter 确认，Esc/Backspace 取消
+      // 系统操作确认框：左右切换焦点，Enter 执行当前，Esc/Backspace 取消
       if (systemAction) {
         switch (e.key) {
+          case "ArrowLeft":
+          case "ArrowRight":
+          case "ArrowUp":
+          case "ArrowDown":
+            setConfirmFocus((f) => (f + 1) % 2);
+            break;
           case "Enter":
-            confirmSystemAction();
+            if (confirmFocus === 0) {
+              confirmSystemAction();
+            } else {
+              setSystemAction(null);
+            }
             break;
           case "Escape":
           case "Backspace":
@@ -955,10 +970,18 @@ function App() {
           <div className="modal">
             <h2>确认执行「{actionLabel(systemAction)}」？</h2>
             <div className="modal-actions">
-              <button className="modal-btn primary focused" onClick={confirmSystemAction}>
+              <button
+                className={`modal-btn primary ${confirmFocus === 0 ? "focused" : ""}`}
+                onClick={confirmSystemAction}
+                onMouseEnter={() => setConfirmFocus(0)}
+              >
                 确认
               </button>
-              <button className="modal-btn" onClick={() => setSystemAction(null)}>
+              <button
+                className={`modal-btn ${confirmFocus === 1 ? "focused" : ""}`}
+                onClick={() => setSystemAction(null)}
+                onMouseEnter={() => setConfirmFocus(1)}
+              >
                 取消
               </button>
             </div>
