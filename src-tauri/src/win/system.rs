@@ -19,10 +19,19 @@ pub fn reboot() {
         .spawn();
 }
 
-/// 睡眠（挂起到内存）。
-pub fn sleep() {
+/// 睡眠（挂起到内存，S3）。
+///
+/// `SetSuspendState(false, false, false)`：
+/// - 参数1 `bHibernate=false` → 挂起到内存（S3，非休眠 S4）
+/// - 参数2 `bForce=false` → 不强制（让系统正常处理）
+/// - 参数3 `bWakeupEventsDisabled=false` → **允许唤醒事件**（遥控器/键盘/鼠标可唤醒）
+pub fn sleep() -> bool {
     unsafe {
-        SetSuspendState(false, false, false);
+        let r = SetSuspendState(false, false, false);
+        if !r {
+            super::log::info("system", "睡眠失败（SetSuspendState 返回 false）");
+        }
+        r
     }
 }
 

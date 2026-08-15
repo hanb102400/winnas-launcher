@@ -133,6 +133,13 @@ winnas-launcher/
 **Q：日志在哪？**
 便携版 `conf/logs/YYYY-MM-DD.log`，安装版 `%APPDATA%\WinNasLauncher\conf\logs\`。
 
+**Q：睡眠后遥控器无法唤醒？**
+睡眠用的是系统 S3 挂起 + 允许唤醒事件。若遥控器无法唤醒，按以下顺序排查：
+
+1. 检查 **BIOS** 里是否启用了「USB Wake from S3 / Resume by USB」；
+2. 打开「设备管理器」→ 找到遥控器接收器（USB 输入设备 / 蓝牙 / HID）→ 右键 → 属性 → 「电源管理」选项卡 → 勾选「**允许此设备唤醒计算机**」；
+3. 运行 `powercfg /a` 确认系统支持 **S3**（若只有 S0 现代待机，则是系统架构决定，无法强制 S3）。
+
 ## 📄 许可证
 
 MIT License（可自行修改）。
