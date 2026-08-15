@@ -10,12 +10,44 @@ use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, SelectObject, BITMAP,
     BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
 };
-use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON};
+use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_ICONLOCATION};
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
+
+/// 解析图标源：`.lnk` 快捷方式解析目标图标文件（避免快捷方式箭头叠加）。
+fn resolve_icon_source(path: &str) -> String {
+    if !path.to_lowercase().ends_with(".lnk") {
+        return path.to_string();
+    }
+    unsafe {
+        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+        let mut sfi = SHFILEINFOW::default();
+        let r = SHGetFileInfoW(
+            PCWSTR::from_raw(wide.as_ptr()),
+            Default::default(),
+            Some(&mut sfi),
+            std::mem::size_of::<SHFILEINFOW>() as u32,
+            SHGFI_ICONLOCATION,
+        );
+        if r != 0 {
+            let len = sfi.szDisplayName.iter().position(|&c| c == 0).unwrap_or(0);
+            if len > 0 {
+                let s = String::from_utf16_lossy(&sfi.szDisplayName[..len]);
+                // 可能形如 "path.dll,index"，取逗号前的文件路径
+                let file = s.split(',').next().unwrap_or(&s).trim().to_string();
+                if !file.is_empty() {
+                    return file;
+                }
+            }
+        }
+    }
+    path.to_string()
+}
 
 /// 提取图标为 PNG data URL（base64），失败返回 None（前端用默认图标）。
 pub fn extract_icon_data_url(path: &str) -> Option<String> {
-    let (w, h, rgba) = extract_icon_rgba(path)?;
+    // .lnk 先解析目标图标源（去掉快捷方式箭头）
+    let src = resolve_icon_source(path);
+    let (w, h, rgba) = extract_icon_rgba(&src)?;
     let img = image::RgbaImage::from_raw(w, h, rgba)?;
     let mut buf = std::io::Cursor::new(Vec::new());
     img.write_to(&mut buf, image::ImageFormat::Png).ok()?;
