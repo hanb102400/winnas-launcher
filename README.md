@@ -150,11 +150,14 @@ winnas-launcher/
 | 应用 | 说明 |
 |------|------|
 | [Kodi](https://kodi.tv) | 开源媒体中心，遥控器体验最佳，本地/网络媒体库、插件生态丰富 |
+| [MediaPortal 2](https://www.team-mediaportal.com) | 老牌 Windows 原生媒体中心，MCE 红外遥控器原生支持，内置电影/剧集/音乐/直播电视 DVR |
 | [Jellyfin Media Player](https://jellyfin.org) | 开源媒体客户端，搭配 Jellyfin 服务端，支持硬件解码 |
 | [Plex HTPC](https://www.plex.tv) | 媒体服务器客户端，大屏 TV 模式 |
 | [Emby Theater](https://emby.media) | 媒体客户端，遥控器导航 |
-| [JRiver Media Center](https://jriver.com) | 专业媒体库管理，原生遥控器支持 |
+| [JRiver Media Center](https://jriver.com) | 全能影音管理，Theater View 影院模式遥控器完美适配，音视频发烧友首选（付费） |
 | [MPC-BE](https://sourceforge.net/projects/mpcbe) / MPC-HC | 轻量媒体播放器，可映射遥控器 |
+| [Zoom Player MAX](https://inmatrix.com/zplayer/) | 老牌 HTPC 播放器，影院模式支持遥控器，格式/字幕/滤镜支持全面 |
+| [TinyPlay](https://github.com) | 开源轻量媒体前端，SMB/NFS 本地视频 + IPTV，全程遥控，低配小主机友好 |
 | [VLC](https://www.videolan.org/vlc) | 通用播放器，全屏模式 |
 
 **游戏平台 / 游戏库**
@@ -163,7 +166,9 @@ winnas-launcher/
 |------|------|
 | [Steam](https://store.steampowered.com) | 大屏幕模式（Big Picture）原生支持手柄/遥控器，游戏库一体化 |
 | [Playnite](https://playnite.link) | 开源游戏库整合，全屏模式，多平台游戏统一管理 |
+| [LaunchBox + BigBox](https://www.launchbox-app.com) | BigBox 独立全屏 TV 前端，精美海报墙，聚合 PC 游戏+模拟器，红外/蓝牙遥控器完美（付费） |
 | [GOG Galaxy](https://www.gog.com/galaxy) | 游戏平台，大屏模式 |
+| Xbox App（微软商店版） | 全屏控制器模式，Game Pass / 自家游戏方向键浏览（局限：仅微软游戏） |
 
 **游戏串流**
 
@@ -176,7 +181,8 @@ winnas-launcher/
 
 | 应用 | 说明 |
 |------|------|
-| [RetroArch](https://www.retroarch.com) | 多平台模拟器整合，海量核心，手柄/遥控器导航 |
+| [RetroArch](https://www.retroarch.com) | 多平台模拟器整合，海量核心，XMB/Ozone 界面手柄/遥控器导航 |
+| [EmulationStation DE](https://es-de.org) | 开源免费模拟器专用前端，全屏海报墙，原生遥控器（免费替代 LaunchBox） |
 | [Dolphin](https://dolphin-emu.org) | NGC / Wii 模拟器 |
 | [PCSX2](https://pcsx2.net) | PS2 模拟器 |
 | [RPCS3](https://rpcs3.net) | PS3 模拟器 |
@@ -189,8 +195,12 @@ winnas-launcher/
 | 应用 | 说明 |
 |------|------|
 | Netflix（Windows 商店版） | 遥控器友好，大屏观影 |
-| YouTube（TV 模式） | 大屏视频 |
+| YouTube（微软商店客户端） | 商店客户端原生焦点导航（非网页版），遥控器浏览视频 |
 | Prime Video / Disney+ / Apple TV+（Windows 商店版） | 遥控器友好 |
+| Twitch（微软商店 TV 客户端） | 大屏界面，遥控器完整浏览直播间、搜索 |
+| 哔哩哔哩 UWP（微软商店版） | 新版 UWP 支持焦点导航，遥控器可操作（网页版不支持） |
+| [Stremio](https://www.stremio.com) | 流媒体聚合平台，大屏海报墙界面，遥控器基本可用（不如 Kodi 全程纯遥控） |
+| [ProgTV / ProgDVB](https://www.progdvb.com) | IPTV、网络电视、电视调谐卡，大屏 TV 界面，原生遥控器 |
 | [HDHomeRun](https://www.silicondust.com) | 电视调谐器直播 |
 | [NextPVR](https://nextpvr.com) | 个人录像 / 直播 |
 
@@ -201,7 +211,7 @@ winnas-launcher/
 | [Spotify](https://www.spotify.com) | 音乐播放，大屏模式 |
 | [Plexamp](https://plexamp.com) | Plex 音乐播放器 |
 | [Deezer](https://www.deezer.com) | 音乐流媒体 |
-| [MusicBee](https://getmusicbee.com) | 本地音乐库管理，功能全面 |
+| [MusicBee](https://getmusicbee.com) | 本地音乐库管理，开启 Theater Mode 剧院模式可遥控器浏览专辑封面 |
 
 > 这些应用在 WinNas Launcher 首页网格里添加后，即可用遥控器一键启动、退出后自动回到 Launcher。模拟器类建议配合手柄（WinNas Launcher 已支持游戏手柄输入）。
 

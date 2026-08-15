@@ -209,6 +209,7 @@ fn rename_app(exe: String, name: String) -> Vec<win::config::AppItem> {
 pub fn run() {
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_dialog::init())
         .setup(|app| {
             // 日志初始化（生成 conf/logs/YYYY-MM-DD.log）
             win::log::init();

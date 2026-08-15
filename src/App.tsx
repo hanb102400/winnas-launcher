@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
+import { open } from "@tauri-apps/plugin-dialog";
 import "./App.css";
 
 // 网格菜单应用项（对应 Rust config::AppItem）
@@ -58,13 +59,15 @@ function App() {
   const menuDown = useRef(false);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
+  const manualInputRef = useRef<HTMLInputElement>(null);
   const [settingsFocus, setSettingsFocus] = useState(0); // 设置抽屉内焦点索引
   const [clock, setClock] = useState(() => new Date());
   const [firstRun, setFirstRun] = useState(false); // 首次启动引导
   const [firstRunFocus, setFirstRunFocus] = useState(0); // 0=不加载 1=加载全部
   const [showAddApp, setShowAddApp] = useState(false);
   const [scanList, setScanList] = useState<AppItem[]>([]);
-  const [scanFocus, setScanFocus] = useState(0);
+  // 添加 APP 页统一焦点索引：0..len-1=列表项，len=输入框，len+1=添加，len+2=浏览文件，len+3=返回
+  const [addAppFocus, setAddAppFocus] = useState(0);
   const [manualPath, setManualPath] = useState("");
 
   // 分页派生状态（设计文档 5.3 网格分页导航）
@@ -280,7 +283,7 @@ function App() {
   const openAddApp = useCallback(async () => {
     setShowAddApp(true);
     setSettingsOpen(false);
-    setScanFocus(0);
+    setAddAppFocus(0);
     setScanList([]);
     setToast("正在扫描已安装程序...");
     try {
@@ -316,6 +319,22 @@ function App() {
     await addAppToGrid({ name, exe: p, icon: "" });
     setManualPath("");
   }, [manualPath, addAppToGrid]);
+
+  // 浏览文件选择应用（原生对话框）
+  const browseFile = useCallback(async () => {
+    try {
+      const selected = await open({
+        multiple: false,
+        filters: [{ name: "应用程序", extensions: ["exe", "lnk"] }],
+      });
+      if (selected && typeof selected === "string") {
+        const name = selected.split(/[\\/]/).pop()?.replace(/\.(exe|lnk)$/i, "") || selected;
+        await addAppToGrid({ name, exe: selected, icon: "" });
+      }
+    } catch (e) {
+      setToast(`浏览失败: ${e}`);
+    }
+  }, [addAppToGrid]);
 
   // 执行设置抽屉第 idx 项
   const executeSettings = useCallback(
@@ -512,17 +531,39 @@ function App() {
         return;
       }
 
-      // 添加 APP 页：上下选择，Enter 添加，Esc 返回
+      // 添加 APP 页：统一焦点（列表项 → 输入框 → 添加 → 浏览文件 → 返回），Enter 执行，Esc 返回
       if (showAddApp) {
+        const inputIdx = scanList.length;
+        const addIdx = scanList.length + 1;
+        const browseIdx = scanList.length + 2;
+        const backIdx = scanList.length + 3;
         switch (e.key) {
           case "ArrowDown":
-            if (scanList.length > 0) setScanFocus((f) => Math.min(f + 1, scanList.length - 1));
+            setAddAppFocus((f) => {
+              const next = Math.min(f + 1, backIdx);
+              if (next === inputIdx) manualInputRef.current?.focus();
+              return next;
+            });
             break;
           case "ArrowUp":
-            setScanFocus((f) => Math.max(f - 1, 0));
+            setAddAppFocus((f) => {
+              const next = Math.max(f - 1, 0);
+              if (next === inputIdx) manualInputRef.current?.focus();
+              return next;
+            });
             break;
           case "Enter":
-            if (scanList.length > 0) addAppToGrid(scanList[scanFocus]);
+            if (addAppFocus < inputIdx) {
+              addAppToGrid(scanList[addAppFocus]);
+            } else if (addAppFocus === inputIdx) {
+              manualInputRef.current?.focus();
+            } else if (addAppFocus === addIdx) {
+              addManualApp();
+            } else if (addAppFocus === browseIdx) {
+              browseFile();
+            } else {
+              setShowAddApp(false);
+            }
             break;
           case "Escape":
           case "Backspace":
@@ -676,8 +717,10 @@ function App() {
       showKeymap,
       showAddApp,
       scanList,
-      scanFocus,
+      addAppFocus,
       addAppToGrid,
+      browseFile,
+      addManualApp,
       manageMode,
       manageTarget,
       manageAction,
@@ -1049,14 +1092,14 @@ function App() {
         <div className="modal-overlay">
           <div className="modal add-app">
             <h2>添加 APP</h2>
-            <p>已安装程序（↑↓ 选择，Enter 添加）</p>
+            <p>已安装程序（↑↓ 移动焦点，Enter 确认，Esc 返回）</p>
             <div className="scan-list">
               {scanList.map((app, i) => (
                 <button
                   key={`${app.exe}-${i}`}
-                  className={`scan-item ${i === scanFocus ? "focused" : ""}`}
+                  className={`scan-item ${i === addAppFocus ? "focused" : ""}`}
                   onClick={() => addAppToGrid(app)}
-                  onMouseEnter={() => setScanFocus(i)}
+                  onMouseEnter={() => setAddAppFocus(i)}
                   onKeyDown={(e) => e.preventDefault()}
                 >
                   {app.icon.startsWith("data:") ? (
@@ -1071,24 +1114,49 @@ function App() {
             </div>
             <div className="manual-add">
               <input
-                className="manual-input"
+                ref={manualInputRef}
+                className={`manual-input ${addAppFocus === scanList.length ? "focused" : ""}`}
                 placeholder="或输入程序路径（exe/lnk）"
                 value={manualPath}
                 onChange={(e) => setManualPath(e.target.value)}
+                onFocus={() => setAddAppFocus(scanList.length)}
                 onKeyDown={(e) => {
                   e.stopPropagation();
                   if (e.key === "Enter") {
                     addManualApp();
                   } else if (e.key === "Escape" || e.key === "BrowserBack") {
                     setShowAddApp(false);
+                  } else if (e.key === "ArrowDown") {
+                    setAddAppFocus(scanList.length + 1);
+                    e.currentTarget.blur();
+                  } else if (e.key === "ArrowUp") {
+                    if (scanList.length > 0) {
+                      setAddAppFocus(scanList.length - 1);
+                      e.currentTarget.blur();
+                    }
                   }
                 }}
               />
-              <button className="modal-btn primary" onClick={addManualApp}>
+              <button
+                className={`modal-btn primary ${addAppFocus === scanList.length + 1 ? "focused" : ""}`}
+                onClick={addManualApp}
+                onMouseEnter={() => setAddAppFocus(scanList.length + 1)}
+              >
                 添加
               </button>
             </div>
-            <button className="modal-btn" onClick={() => setShowAddApp(false)}>
+            <button
+              className={`modal-btn ${addAppFocus === scanList.length + 2 ? "focused" : ""}`}
+              onClick={browseFile}
+              onMouseEnter={() => setAddAppFocus(scanList.length + 2)}
+            >
+              📂 浏览文件...
+            </button>
+            <button
+              className={`modal-btn ${addAppFocus === scanList.length + 3 ? "focused" : ""}`}
+              onClick={() => setShowAddApp(false)}
+              onMouseEnter={() => setAddAppFocus(scanList.length + 3)}
+            >
               ← 返回
             </button>
           </div>
