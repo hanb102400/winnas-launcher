@@ -108,7 +108,7 @@ body {
   padding: 12px 0;
 }
 
-/* ── 应用网格（6列×3行） ────────────────── */
+/* ── 应用网格（6列×4行） ────────────────── */
 .grid {
   display: grid;
   grid-template-columns: repeat(6, 190px);
@@ -460,4 +460,17 @@ body {
 .keymap-action {
   font-size: 18px;
   color: var(--text-dim);
+}
+
+/* ── 管理模式 ───────────────────────────── */
+.tile.managing {
+  border-style: dashed;
+  border-color: rgba(245, 185, 66, 0.6);
+}
+
+.modal.manage .manage-actions {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  margin-top: 8px;
 }

@@ -175,6 +175,28 @@ fn init_menu(mode: String) -> Vec<win::config::AppItem> {
     apps
 }
 
+/// 管理 APP：删除应用。
+#[tauri::command]
+fn remove_app(exe: String) -> Vec<win::config::AppItem> {
+    win::log::info("apps", &format!("删除应用: {exe}"));
+    win::config::remove_app(&exe);
+    win::config::load_apps()
+}
+
+/// 管理 APP：移到最前。
+#[tauri::command]
+fn move_app_to_front(exe: String) -> Vec<win::config::AppItem> {
+    win::config::move_to_front(&exe);
+    win::config::load_apps()
+}
+
+/// 管理 APP：移到最后。
+#[tauri::command]
+fn move_app_to_end(exe: String) -> Vec<win::config::AppItem> {
+    win::config::move_to_end(&exe);
+    win::config::load_apps()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -234,7 +256,10 @@ pub fn run() {
             system_lock,
             clear_menu_cache,
             enter_maintenance,
-            exit_maintenance
+            exit_maintenance,
+            remove_app,
+            move_app_to_front,
+            move_app_to_end
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

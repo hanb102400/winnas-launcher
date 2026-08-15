@@ -5,42 +5,42 @@
 //! 前端可直接用 `<img src=dataURL>` 展示，无需文件系统路径。
 
 use base64::Engine;
-use windows::core::PCWSTR;
+use windows::core::{Interface, PCWSTR};
 use windows::Win32::Graphics::Gdi::{
     CreateCompatibleDC, DeleteDC, DeleteObject, GetDIBits, GetObjectW, SelectObject, BITMAP,
     BITMAPINFO, BITMAPINFOHEADER, BI_RGB, DIB_RGB_COLORS, HGDIOBJ,
 };
-use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, SHGFI_ICONLOCATION};
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED, STGM_READ, IPersistFile,
+};
+use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, IShellLinkW, ShellLink};
 use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
 
-/// 解析图标源：`.lnk` 快捷方式解析目标图标文件（避免快捷方式箭头叠加）。
+/// 解析图标源：`.lnk` 快捷方式用 IShellLink 解析目标文件路径（避免快捷方式箭头叠加）。
 fn resolve_icon_source(path: &str) -> String {
     if !path.to_lowercase().ends_with(".lnk") {
         return path.to_string();
     }
+    resolve_lnk_target(path).unwrap_or_else(|| path.to_string())
+}
+
+/// 用 IShellLink 解析 `.lnk` 指向的目标路径。
+fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
     unsafe {
-        let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
-        let mut sfi = SHFILEINFOW::default();
-        let r = SHGetFileInfoW(
-            PCWSTR::from_raw(wide.as_ptr()),
-            Default::default(),
-            Some(&mut sfi),
-            std::mem::size_of::<SHFILEINFOW>() as u32,
-            SHGFI_ICONLOCATION,
-        );
-        if r != 0 {
-            let len = sfi.szDisplayName.iter().position(|&c| c == 0).unwrap_or(0);
-            if len > 0 {
-                let s = String::from_utf16_lossy(&sfi.szDisplayName[..len]);
-                // 可能形如 "path.dll,index"，取逗号前的文件路径
-                let file = s.split(',').next().unwrap_or(&s).trim().to_string();
-                if !file.is_empty() {
-                    return file;
-                }
-            }
+        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_ALL).ok()?;
+        let persist: IPersistFile = shell_link.cast().ok()?;
+        let wide: Vec<u16> = lnk_path.encode_utf16().chain(std::iter::once(0)).collect();
+        persist.Load(PCWSTR::from_raw(wide.as_ptr()), STGM_READ).ok()?;
+        let mut buf = [0u16; 1024];
+        shell_link.GetPath(&mut buf, std::ptr::null_mut(), 0).ok()?;
+        let len = buf.iter().position(|&c| c == 0).unwrap_or(0);
+        if len > 0 {
+            Some(String::from_utf16_lossy(&buf[..len]))
+        } else {
+            None
         }
     }
-    path.to_string()
 }
 
 /// 提取图标为 PNG data URL（base64），失败返回 None（前端用默认图标）。

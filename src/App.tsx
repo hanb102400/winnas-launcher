@@ -18,9 +18,9 @@ interface Config {
   menu_mode: string;
 }
 
-// 网格规模（设计文档 5.2：6 列 × 3 行 = 18 项/页）
+// 网格规模（设计文档 5.2：6 列 × 4 行 = 24 项/页）
 const COLS = 6;
-const ROWS = 3;
+const ROWS = 4;
 const PAGE_SIZE = COLS * ROWS;
 
 // 键位说明（M4-3，后续可重映射）
@@ -46,6 +46,9 @@ function App() {
   const [osdVisible, setOsdVisible] = useState(false);
   const [systemAction, setSystemAction] = useState<string | null>(null);
   const [showKeymap, setShowKeymap] = useState(false);
+  const [manageMode, setManageMode] = useState(false);
+  const [manageTarget, setManageTarget] = useState<AppItem | null>(null);
+  const [manageAction, setManageAction] = useState(0); // 0=删除 1=移到最前 2=移到最后 3=取消
   const [settingsFocus, setSettingsFocus] = useState(0); // 设置抽屉内焦点索引
   const [clock, setClock] = useState(() => new Date());
   const [firstRun, setFirstRun] = useState(false); // 首次启动引导
@@ -120,6 +123,51 @@ function App() {
     setConfirmExit(true);
     setConfirmFocus(0);
   }, []);
+
+  // 进入管理模式（焦点回到网格）
+  const enterManageMode = useCallback(() => {
+    setSettingsOpen(false);
+    setManageMode(true);
+    setManageTarget(null);
+    setFocusIndex(0);
+  }, []);
+
+  // 退出管理模式（焦点回到设置）
+  const exitManageMode = useCallback(() => {
+    setManageMode(false);
+    setManageTarget(null);
+    setSettingsOpen(true);
+    setSettingsFocus(0);
+  }, []);
+
+  // 执行管理操作（删除/移到最前/移到最后/取消）
+  const executeManageAction = useCallback(async () => {
+    if (!manageTarget) return;
+    const exe = manageTarget.exe;
+    try {
+      let list: AppItem[];
+      switch (manageAction) {
+        case 0:
+          list = await invoke<AppItem[]>("remove_app", { exe });
+          setToast(`已删除 ${manageTarget.name}`);
+          break;
+        case 1:
+          list = await invoke<AppItem[]>("move_app_to_front", { exe });
+          setToast(`已移到最前：${manageTarget.name}`);
+          break;
+        case 2:
+          list = await invoke<AppItem[]>("move_app_to_end", { exe });
+          setToast(`已移到最后：${manageTarget.name}`);
+          break;
+        default:
+          list = apps;
+      }
+      setApps(list);
+    } catch (e) {
+      setToast(`操作失败: ${e}`);
+    }
+    setManageTarget(null);
+  }, [manageTarget, manageAction, apps]);
 
   const toggleAutostart = useCallback(async () => {
     const next = !autostart;
@@ -206,28 +254,31 @@ function App() {
           openAddApp();
           break;
         case 4:
-          setShowKeymap(true);
+          enterManageMode();
           break;
         case 5:
-          setSystemAction("reboot");
+          setShowKeymap(true);
           break;
         case 6:
-          setSystemAction("sleep");
+          setSystemAction("reboot");
           break;
         case 7:
-          setSystemAction("lock");
+          setSystemAction("sleep");
           break;
         case 8:
+          setSystemAction("lock");
+          break;
+        case 9:
           setSettingsOpen(false);
           setConfirmExit(true);
           setConfirmFocus(0);
           break;
-        case 9:
+        case 10:
           setSettingsOpen(false);
           break;
       }
     },
-    [restoreDesktop, clearMenuCache, toggleAutostart, openAddApp],
+    [restoreDesktop, clearMenuCache, toggleAutostart, openAddApp, enterManageMode],
   );
 
   // 确认系统操作
@@ -290,6 +341,7 @@ function App() {
             break;
           case "Escape":
           case "Backspace":
+          case "BrowserBack":
             setConfirmExit(false);
             break;
         }
@@ -305,6 +357,7 @@ function App() {
             break;
           case "Escape":
           case "Backspace":
+          case "BrowserBack":
             setSystemAction(null);
             break;
         }
@@ -314,8 +367,30 @@ function App() {
 
       // 按键说明弹窗：任意键关闭
       if (showKeymap) {
-        if (e.key === "Escape" || e.key === "Backspace" || e.key === "Enter") {
+        if (e.key === "Escape" || e.key === "Backspace" || e.key === "BrowserBack" || e.key === "Enter") {
           setShowKeymap(false);
+        }
+        e.preventDefault();
+        return;
+      }
+
+      // 管理 APP 操作菜单：方向键选择，Enter 执行，Esc 取消
+      if (manageTarget) {
+        switch (e.key) {
+          case "ArrowDown":
+            setManageAction((f) => Math.min(f + 1, 3));
+            break;
+          case "ArrowUp":
+            setManageAction((f) => Math.max(f - 1, 0));
+            break;
+          case "Enter":
+            executeManageAction();
+            break;
+          case "Escape":
+          case "Backspace":
+          case "BrowserBack":
+            setManageTarget(null);
+            break;
         }
         e.preventDefault();
         return;
@@ -335,6 +410,7 @@ function App() {
             break;
           case "Escape":
           case "Backspace":
+          case "BrowserBack":
             setShowAddApp(false);
             break;
         }
@@ -346,7 +422,7 @@ function App() {
       if (settingsOpen) {
         switch (e.key) {
           case "ArrowDown":
-            setSettingsFocus((f) => Math.min(f + 1, 9));
+            setSettingsFocus((f) => Math.min(f + 1, 10));
             break;
           case "ArrowUp":
             setSettingsFocus((f) => Math.max(f - 1, 0));
@@ -356,6 +432,7 @@ function App() {
             break;
           case "Escape":
           case "Backspace":
+          case "BrowserBack":
             setSettingsOpen(false);
             break;
         }
@@ -381,6 +458,7 @@ function App() {
             break;
           case "Escape":
           case "Backspace":
+          case "BrowserBack":
             setGearFocused(false);
             break;
         }
@@ -395,7 +473,7 @@ function App() {
         } else if (e.key === "F1" || e.key === "ContextMenu") {
           setSettingsOpen((o) => !o);
           setSettingsFocus(0);
-        } else if (e.key === "Escape" || e.key === "Backspace") {
+        } else if (e.key === "Escape" || e.key === "Backspace" || e.key === "BrowserBack") {
           setConfirmExit(true);
           setConfirmFocus(0);
         }
@@ -441,13 +519,25 @@ function App() {
           e.preventDefault();
           break;
         case "Enter":
-          launch(apps[focusIndex]);
+          if (manageMode) {
+            // 管理模式：弹出操作菜单（而非启动）
+            if (apps.length > 0) {
+              setManageTarget(apps[focusIndex]);
+              setManageAction(0);
+            }
+          } else {
+            launch(apps[focusIndex]);
+          }
           e.preventDefault();
           break;
         case "Escape":
         case "Backspace":
-          setConfirmExit(true);
-          setConfirmFocus(0);
+          if (manageMode) {
+            exitManageMode();
+          } else {
+            setConfirmExit(true);
+            setConfirmFocus(0);
+          }
           e.preventDefault();
           break;
         case "F1":
@@ -471,6 +561,11 @@ function App() {
       scanList,
       scanFocus,
       addAppToGrid,
+      manageMode,
+      manageTarget,
+      manageAction,
+      executeManageAction,
+      exitManageMode,
       settingsOpen,
       settingsFocus,
       executeSettings,
@@ -527,7 +622,7 @@ function App() {
               return (
                 <button
                   key={`${app.exe}-${i}`}
-                  className={`tile ${focused ? "focused" : ""}`}
+                  className={`tile ${focused ? "focused" : ""} ${manageMode ? "managing" : ""}`}
                   onClick={() => {
                     setFocusIndex(pageIndex * PAGE_SIZE + i);
                     launch(app);
@@ -557,7 +652,11 @@ function App() {
       )}
 
       {/* 提示条 */}
-      <div className="hint">← → ↑ ↓ 切换 · Enter 启动 · F1/菜单 设置</div>
+      <div className="hint">
+        {manageMode
+          ? "管理模式 · Enter 编辑 · 返回键退出"
+          : "← → ↑ ↓ 切换 · Enter 启动 · F1/菜单 设置"}
+      </div>
 
       {/* Toast */}
       {toast && <div className="toast">{toast}</div>}
@@ -607,47 +706,54 @@ function App() {
           </button>
           <button
             className={`drawer-item ${settingsFocus === 4 ? "focused" : ""}`}
-            onClick={() => setShowKeymap(true)}
+            onClick={enterManageMode}
             onMouseEnter={() => setSettingsFocus(4)}
+          >
+            🗂️ 管理 APP
+          </button>
+          <button
+            className={`drawer-item ${settingsFocus === 5 ? "focused" : ""}`}
+            onClick={() => setShowKeymap(true)}
+            onMouseEnter={() => setSettingsFocus(5)}
           >
             ⌨️ 按键说明
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 5 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 6 ? "focused" : ""}`}
             onClick={() => setSystemAction("reboot")}
-            onMouseEnter={() => setSettingsFocus(5)}
+            onMouseEnter={() => setSettingsFocus(6)}
           >
             🔄 重启
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 6 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 7 ? "focused" : ""}`}
             onClick={() => setSystemAction("sleep")}
-            onMouseEnter={() => setSettingsFocus(6)}
+            onMouseEnter={() => setSettingsFocus(7)}
           >
             💤 睡眠
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 7 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 8 ? "focused" : ""}`}
             onClick={() => setSystemAction("lock")}
-            onMouseEnter={() => setSettingsFocus(7)}
+            onMouseEnter={() => setSettingsFocus(8)}
           >
             🔒 锁屏
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 8 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 9 ? "focused" : ""}`}
             onClick={() => {
               setSettingsOpen(false);
               setConfirmExit(true);
               setConfirmFocus(0);
             }}
-            onMouseEnter={() => setSettingsFocus(8)}
+            onMouseEnter={() => setSettingsFocus(9)}
           >
             🚪 退出 Launcher
           </button>
           <button
-            className={`drawer-item ${settingsFocus === 9 ? "focused" : ""}`}
+            className={`drawer-item ${settingsFocus === 10 ? "focused" : ""}`}
             onClick={() => setSettingsOpen(false)}
-            onMouseEnter={() => setSettingsFocus(9)}
+            onMouseEnter={() => setSettingsFocus(10)}
           >
             ← 返回
           </button>
@@ -715,6 +821,54 @@ function App() {
         </div>
       )}
 
+      {/* 管理 APP 操作菜单 */}
+      {manageTarget && (
+        <div className="modal-overlay">
+          <div className="modal manage">
+            <h2>管理「{manageTarget.name}」</h2>
+            <div className="manage-actions">
+              <button
+                className={`modal-btn ${manageAction === 0 ? "focused" : ""}`}
+                onClick={() => {
+                  setManageAction(0);
+                  executeManageAction();
+                }}
+                onMouseEnter={() => setManageAction(0)}
+              >
+                🗑️ 删除
+              </button>
+              <button
+                className={`modal-btn ${manageAction === 1 ? "focused" : ""}`}
+                onClick={() => {
+                  setManageAction(1);
+                  executeManageAction();
+                }}
+                onMouseEnter={() => setManageAction(1)}
+              >
+                ⬆️ 移到最前
+              </button>
+              <button
+                className={`modal-btn ${manageAction === 2 ? "focused" : ""}`}
+                onClick={() => {
+                  setManageAction(2);
+                  executeManageAction();
+                }}
+                onMouseEnter={() => setManageAction(2)}
+              >
+                ⬇️ 移到最后
+              </button>
+              <button
+                className={`modal-btn ${manageAction === 3 ? "focused" : ""}`}
+                onClick={() => setManageTarget(null)}
+                onMouseEnter={() => setManageAction(3)}
+              >
+                ← 取消
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* 添加 APP 页 */}
       {showAddApp && (
         <div className="modal-overlay">
@@ -750,7 +904,7 @@ function App() {
                   e.stopPropagation();
                   if (e.key === "Enter") {
                     addManualApp();
-                  } else if (e.key === "Escape") {
+                  } else if (e.key === "Escape" || e.key === "BrowserBack") {
                     setShowAddApp(false);
                   }
                 }}

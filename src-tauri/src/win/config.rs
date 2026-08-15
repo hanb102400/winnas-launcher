@@ -21,6 +21,9 @@ pub struct AppItem {
     /// 打开次数（每次启动 +1，首页按此降序排序）
     #[serde(default)]
     pub launch_count: u32,
+    /// 固定标记（手动「移到最前/最后」后为 true，排序时固定项优先保持手动顺序）
+    #[serde(default)]
+    pub pinned: bool,
 }
 
 /// 程序默认配置项。
@@ -135,13 +138,17 @@ pub fn load_apps() -> Vec<AppItem> {
     apps
 }
 
-/// 排序：打开次数降序 + 名称升序。
+/// 排序：固定项（pinned）按手动顺序排前，非固定项按打开次数降序 + 名称升序排后。
 fn sort_apps(apps: &mut [AppItem]) {
-    apps.sort_by(|a, b| {
+    let mut pinned: Vec<AppItem> = apps.iter().filter(|a| a.pinned).cloned().collect();
+    let mut unpinned: Vec<AppItem> = apps.iter().filter(|a| !a.pinned).cloned().collect();
+    unpinned.sort_by(|a, b| {
         b.launch_count
             .cmp(&a.launch_count)
             .then_with(|| a.name.cmp(&b.name))
     });
+    pinned.extend(unpinned);
+    apps.clone_from_slice(&pinned);
 }
 
 /// 增加指定 exe 路径的打开次数。
@@ -151,6 +158,35 @@ pub fn increment_launch_count(exe: &str) {
         app.launch_count += 1;
         save_apps(&apps);
     }
+}
+
+/// 移到最前（固定到第一位）。
+pub fn move_to_front(exe: &str) {
+    let mut apps = load_apps();
+    if let Some(i) = apps.iter().position(|a| a.exe == exe) {
+        let mut app = apps.remove(i);
+        app.pinned = true;
+        apps.insert(0, app);
+        save_apps(&apps);
+    }
+}
+
+/// 移到最后（固定到最后一位）。
+pub fn move_to_end(exe: &str) {
+    let mut apps = load_apps();
+    if let Some(i) = apps.iter().position(|a| a.exe == exe) {
+        let mut app = apps.remove(i);
+        app.pinned = true;
+        apps.push(app);
+        save_apps(&apps);
+    }
+}
+
+/// 删除应用。
+pub fn remove_app(exe: &str) {
+    let mut apps = load_apps();
+    apps.retain(|a| a.exe != exe);
+    save_apps(&apps);
 }
 
 /// 写网格菜单列表（排序 + 写内存缓存 + apps.json）。
