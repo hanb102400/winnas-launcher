@@ -14,7 +14,7 @@ use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED, STGM_READ, IPersistFile,
 };
 use windows::Win32::UI::Shell::{SHGetFileInfoW, SHFILEINFOW, SHGFI_ICON, IShellLinkW, ShellLink};
-use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, ICONINFO};
+use windows::Win32::UI::WindowsAndMessaging::{DestroyIcon, GetIconInfo, HICON, ICONINFO};
 
 /// 解析图标源：`.lnk` 快捷方式用 IShellLink 解析目标文件路径（避免快捷方式箭头叠加）。
 fn resolve_icon_source(path: &str) -> String {
@@ -27,7 +27,11 @@ fn resolve_icon_source(path: &str) -> String {
 /// 用 IShellLink 解析 `.lnk` 指向的目标路径。
 fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // STA 初始化（S_OK=本次初始化 / S_FALSE=线程已初始化）；RPC_E_CHANGED_MODE 等错误则放弃
+        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if hr.is_err() {
+            return None;
+        }
         let shell_link: IShellLinkW = CoCreateInstance(&ShellLink, None, CLSCTX_ALL).ok()?;
         let persist: IPersistFile = shell_link.cast().ok()?;
         let wide: Vec<u16> = lnk_path.encode_utf16().chain(std::iter::once(0)).collect();
@@ -56,6 +60,17 @@ pub fn extract_icon_data_url(path: &str) -> Option<String> {
     Some(format!("data:image/png;base64,{b64}"))
 }
 
+/// 清理 SHGetFileInfoW / GetIconInfo 取得的图标资源（GDI 句柄）。
+unsafe fn destroy_icon_resources(hicon: HICON, ii: &ICONINFO) {
+    let _ = DestroyIcon(hicon);
+    if !ii.hbmColor.0.is_null() {
+        let _ = DeleteObject(HGDIOBJ(ii.hbmColor.0));
+    }
+    if !ii.hbmMask.0.is_null() {
+        let _ = DeleteObject(HGDIOBJ(ii.hbmMask.0));
+    }
+}
+
 fn extract_icon_rgba(path: &str) -> Option<(u32, u32, Vec<u8>)> {
     unsafe {
         // 1. SHGetFileInfoW 提取 HICON（.exe/.lnk 均可）
@@ -75,7 +90,10 @@ fn extract_icon_rgba(path: &str) -> Option<(u32, u32, Vec<u8>)> {
 
         // 2. GetIconInfo 取位图（优先彩色，否则 mask）
         let mut ii = ICONINFO::default();
-        GetIconInfo(hicon, &mut ii).ok()?;
+        if GetIconInfo(hicon, &mut ii).is_err() {
+            destroy_icon_resources(hicon, &ii);
+            return None;
+        }
         let hbm = if !ii.hbmColor.0.is_null() {
             ii.hbmColor
         } else {
@@ -90,11 +108,13 @@ fn extract_icon_rgba(path: &str) -> Option<(u32, u32, Vec<u8>)> {
             Some(&mut bm as *mut _ as *mut core::ffi::c_void),
         );
         if got == 0 {
+            destroy_icon_resources(hicon, &ii);
             return None;
         }
         let w = bm.bmWidth as u32;
         let h = bm.bmHeight as u32;
         if w == 0 || h == 0 {
+            destroy_icon_resources(hicon, &ii);
             return None;
         }
 
@@ -124,17 +144,12 @@ fn extract_icon_rgba(path: &str) -> Option<(u32, u32, Vec<u8>)> {
         SelectObject(hdc, old);
         let _ = DeleteDC(hdc);
         if got == 0 {
+            destroy_icon_resources(hicon, &ii);
             return None;
         }
 
-        // 清理
-        let _ = DestroyIcon(hicon);
-        if !ii.hbmColor.0.is_null() {
-            let _ = DeleteObject(HGDIOBJ(ii.hbmColor.0));
-        }
-        if !ii.hbmMask.0.is_null() {
-            let _ = DeleteObject(HGDIOBJ(ii.hbmMask.0));
-        }
+        // 清理图标资源（hbmColor/hbmMask 由 GetIconInfo 分配，需单独 DeleteObject）
+        destroy_icon_resources(hicon, &ii);
 
         // 5. BGRA → RGBA
         let mut rgba = vec![0u8; pixels.len()];

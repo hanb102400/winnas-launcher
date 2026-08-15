@@ -187,6 +187,8 @@ function App() {
           list = apps;
       }
       setApps(list);
+      // 删除收缩列表后夹紧焦点，避免 focusIndex 越界访问 undefined
+      setFocusIndex((f) => Math.min(f, Math.max(0, list.length - 1)));
     } catch (e) {
       setToast(`操作失败: ${e}`);
     }
@@ -260,7 +262,7 @@ function App() {
   const toggleAutostart = useCallback(async () => {
     const next = !autostart;
     const ok = await invoke<boolean>("set_autostart", { enabled: next });
-    setAutostart(next);
+    if (ok) setAutostart(next);
     setToast(ok ? `开机自启已${next ? "开启" : "关闭"}` : "设置自启失败");
   }, [autostart]);
 
@@ -647,8 +649,12 @@ function App() {
           setSettingsOpen((o) => !o);
           setSettingsFocus(0);
         } else if (e.key === "Escape" || e.key === "Backspace" || e.key === "BrowserBack") {
-          setConfirmExit(true);
-          setConfirmFocus(0);
+          if (manageMode) {
+            exitManageMode();
+          } else {
+            setConfirmExit(true);
+            setConfirmFocus(0);
+          }
         }
         e.preventDefault();
         return;

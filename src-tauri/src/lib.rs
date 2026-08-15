@@ -32,10 +32,12 @@ fn set_autostart(enabled: bool) -> bool {
     } else {
         win::autostart::disable()
     };
-    // 同步更新配置
-    let mut config = win::config::get();
-    config.autostart = enabled;
-    win::config::save(&config);
+    // 仅在实际成功时同步更新配置，避免注册表写入失败导致状态脱钩
+    if ok {
+        let mut config = win::config::get();
+        config.autostart = enabled;
+        win::config::save(&config);
+    }
     win::log::info("autostart", &format!("设置开机自启 {enabled} -> {ok}"));
     ok
 }
@@ -217,9 +219,12 @@ pub fn run() {
             win::state::set_app_handle(app.handle().clone());
             // 注册崩溃自动重启（WER；仅崩溃时重启，正常退出不重启；失败则降级到 4.13 状态快照自愈）
             unsafe {
+                // 仅崩溃时自动重启（排除挂起/补丁/重启触发的重启，避免误循环）
                 let _ = windows::Win32::System::Recovery::RegisterApplicationRestart(
                     windows::core::PCWSTR::null(),
-                    windows::Win32::System::Recovery::REGISTER_APPLICATION_RESTART_FLAGS(0),
+                    windows::Win32::System::Recovery::RESTART_NO_HANG
+                        | windows::Win32::System::Recovery::RESTART_NO_PATCH
+                        | windows::Win32::System::Recovery::RESTART_NO_REBOOT,
                 );
             }
             win::log::info("boot", "已注册崩溃自动重启");
@@ -279,6 +284,7 @@ pub fn run() {
         if let tauri::RunEvent::Exit = event {
             win::taskbar::restore();
             win::power::restore_power();
+            win::focus::restore_foreground_lock_timeout();
             win::system_state::mark_clean();
             win::log::info("exit", "正常退出，已恢复系统状态");
         }

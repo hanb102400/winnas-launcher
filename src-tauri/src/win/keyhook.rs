@@ -62,6 +62,30 @@ fn emit_volume_changed() {
     }
 }
 
+/// 后台线程执行拦截动作（钩子回调须尽快返回，禁止在回调内做重活/写文件/flush）。
+fn run_action(name: &'static str) {
+    std::thread::spawn(move || match name {
+        "VOL_UP" => {
+            volume::set_volume(volume::get_volume() + 0.05);
+            emit_volume_changed();
+        }
+        "VOL_DOWN" => {
+            volume::set_volume(volume::get_volume() - 0.05);
+            emit_volume_changed();
+        }
+        "VOL_MUTE" => {
+            volume::toggle_mute();
+            emit_volume_changed();
+        }
+        "SLEEP" => {
+            // 遥控器电源键 → S3 睡眠（而非关机），吞掉系统默认行为
+            eprintln!("[keyhook] 电源键 → S3 睡眠");
+            system::sleep();
+        }
+        _ => eprintln!("[keyhook] INTERCEPT {name}"),
+    });
+}
+
 unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
     if code >= 0 {
         let msg = wparam.0 as u32;
@@ -75,27 +99,8 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
 
         if let Some(name) = classify(vk, win, alt, ctrl, shift) {
             if msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN {
-                match name {
-                    "VOL_UP" => {
-                        volume::set_volume(volume::get_volume() + 0.05);
-                        emit_volume_changed();
-                    }
-                    "VOL_DOWN" => {
-                        volume::set_volume(volume::get_volume() - 0.05);
-                        emit_volume_changed();
-                    }
-                    "VOL_MUTE" => {
-                        volume::toggle_mute();
-                        emit_volume_changed();
-                    }
-                    "SLEEP" => {
-                        // 遥控器电源键 → S3 睡眠（而非关机），吞掉系统默认行为
-                        eprintln!("[keyhook] 电源键 → S3 睡眠");
-                        system::sleep();
-                    }
-                    // 回调内只做轻量输出，禁止写文件/flush（会阻塞钩子线程导致按键丢失）
-                    _ => eprintln!("[keyhook] INTERCEPT {name}"),
-                }
+                // 重活（音量/睡眠）移到后台线程，钩子回调只判定 + 吞键（LL 钩子有超时限制）
+                run_action(name);
             }
             return LRESULT(1); // 吞掉该击键，阻止系统处理
         }

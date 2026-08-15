@@ -5,7 +5,6 @@
 //!
 //! 退出后递减运行计数；归零则 `AppRunning=false` 并触发 focus 延时夺焦（4.8）。
 
-use std::sync::atomic::{AtomicIsize, Ordering};
 use std::time::Duration;
 
 use windows::core::{w, BOOL, PCWSTR};
@@ -19,7 +18,8 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Threading::{
-    CreateProcessW, GetProcessId, WaitForSingleObject, STARTUPINFOW, PROCESS_INFORMATION,
+    CreateProcessW, GetProcessId, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
+    PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, STARTUPINFOW,
 };
 use windows::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOCLOSEPROCESS};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -30,14 +30,18 @@ use windows::Win32::UI::WindowsAndMessaging::{
 
 use super::{focus, state, window};
 
-static FOUND_HWND: AtomicIsize = AtomicIsize::new(0);
+/// 枚举窗口回调的线程局部上下文（通过 lParam 传入，避免全局静态的并发竞态）。
+struct FindWindowState {
+    pid: u32,
+    hwnd: HWND,
+}
 
 unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
-    let target_pid = lparam.0 as u32;
+    let state = &mut *(lparam.0 as *mut FindWindowState);
     let mut pid = 0u32;
     GetWindowThreadProcessId(hwnd, Some(&mut pid));
-    if pid == target_pid && IsWindowVisible(hwnd).as_bool() {
-        FOUND_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
+    if pid == state.pid && IsWindowVisible(hwnd).as_bool() {
+        state.hwnd = hwnd;
         return BOOL(0); // 停止枚举
     }
     BOOL(1) // 继续
@@ -46,23 +50,57 @@ unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
 /// 找进程的第一个可见主窗口。
 fn find_main_window(pid: u32) -> Option<HWND> {
     unsafe {
-        FOUND_HWND.store(0, Ordering::SeqCst);
-        let _ = EnumWindows(Some(enum_proc), LPARAM(pid as isize)).ok();
-        let h = FOUND_HWND.load(Ordering::SeqCst);
-        if h != 0 {
-            Some(HWND(h as *mut core::ffi::c_void))
+        let mut state = FindWindowState {
+            pid,
+            hwnd: HWND(std::ptr::null_mut()),
+        };
+        let _ = EnumWindows(
+            Some(enum_proc),
+            LPARAM(&mut state as *mut FindWindowState as isize),
+        )
+        .ok();
+        if state.hwnd.0.is_null() {
+            None
+        } else {
+            Some(state.hwnd)
+        }
+    }
+}
+
+/// 取指定进程的完整镜像路径（受保护进程拿不到，返回 None）。
+fn process_full_path(pid: u32) -> Option<String> {
+    unsafe {
+        let h = OpenProcess(PROCESS_QUERY_LIMITED_INFORMATION, false, pid).ok()?;
+        let mut buf = [0u16; 1024];
+        let mut size = buf.len() as u32;
+        let r = QueryFullProcessImageNameW(
+            h,
+            PROCESS_NAME_WIN32,
+            windows::core::PWSTR(buf.as_mut_ptr()),
+            &mut size,
+        );
+        let _ = CloseHandle(h);
+        r.ok()?;
+        let n = (size as usize).min(buf.len());
+        let len = buf[..n].iter().position(|&c| c == 0).unwrap_or(n);
+        if len > 0 {
+            Some(String::from_utf16_lossy(&buf[..len]))
         } else {
             None
         }
     }
 }
 
-/// 检测是否有与 `exe_path` 同名的进程已在运行，返回其 PID。
+/// 检测是否有与 `exe_path` 同路径的进程已在运行，返回其 PID。
+/// 先按文件名粗筛，再比对完整镜像路径，避免不同目录同名 exe 误判。
 fn find_running_process(exe_path: &str) -> Option<u32> {
     let exe_name = std::path::Path::new(exe_path)
         .file_name()?
         .to_string_lossy()
         .to_lowercase();
+    let target_canon = std::fs::canonicalize(exe_path)
+        .map(|p| p.to_string_lossy().to_lowercase())
+        .unwrap_or_else(|_| exe_path.to_lowercase());
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
         let mut entry = PROCESSENTRY32W::default();
@@ -73,8 +111,14 @@ fn find_running_process(exe_path: &str) -> Option<u32> {
                 let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(0);
                 let name = String::from_utf16_lossy(&entry.szExeFile[..len]).to_lowercase();
                 if name == exe_name {
-                    found = Some(entry.th32ProcessID);
-                    break;
+                    // 同名进程：进一步校验完整路径（拿不到路径时退化为仅按文件名，保留原行为）
+                    let same_path = process_full_path(entry.th32ProcessID)
+                        .map(|full| full.to_lowercase() == target_canon)
+                        .unwrap_or(true);
+                    if same_path {
+                        found = Some(entry.th32ProcessID);
+                        break;
+                    }
                 }
                 if Process32NextW(snapshot, &mut entry).is_err() {
                     break;

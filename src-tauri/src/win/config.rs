@@ -76,6 +76,16 @@ fn apps_path() -> PathBuf {
     exe_dir().join("apps.json")
 }
 
+/// 原子写（写临时文件 + rename），避免写一半崩溃损坏 JSON（与 system_state 一致）。
+fn atomic_write(path: &std::path::Path, data: &str) -> std::io::Result<()> {
+    if let Some(dir) = path.parent() {
+        fs::create_dir_all(dir)?;
+    }
+    let tmp = path.with_extension("json.tmp");
+    fs::write(&tmp, data)?;
+    fs::rename(&tmp, path)
+}
+
 /// 启动时初始化：没有则创建默认配置并读取，有则直接读取，存入内存缓存。
 pub fn init() {
     let path = config_path();
@@ -93,7 +103,7 @@ pub fn init() {
     } else {
         let config = Config::default();
         match serde_json::to_string_pretty(&config) {
-            Ok(data) => match fs::write(&path, data) {
+            Ok(data) => match atomic_write(&path, &data) {
                 Ok(_) => log::info("config", &format!("创建默认配置 {}", path.display())),
                 Err(e) => log::info("config", &format!("创建配置失败: {e}")),
             },
@@ -117,7 +127,7 @@ pub fn save(config: &Config) {
     *CONFIG.write().unwrap() = Some(config.clone());
     let path = config_path();
     if let Ok(data) = serde_json::to_string_pretty(config) {
-        let _ = fs::write(&path, data);
+        let _ = atomic_write(&path, &data);
     }
 }
 
@@ -220,6 +230,6 @@ pub fn save_apps(apps: &[AppItem]) {
     *APPS.write().unwrap() = Some(sorted.clone());
     let path = apps_path();
     if let Ok(data) = serde_json::to_string_pretty(&sorted) {
-        let _ = fs::write(&path, data);
+        let _ = atomic_write(&path, &data);
     }
 }

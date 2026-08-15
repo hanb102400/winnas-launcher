@@ -2,19 +2,30 @@
 //!
 //! 关机/重启用系统 `shutdown.exe`（无需提权）；睡眠用 `SetSuspendState`；锁屏用 `LockWorkStation`。
 
+use std::path::PathBuf;
+
 use windows::Win32::System::Power::SetSuspendState;
 use windows::Win32::System::Shutdown::LockWorkStation;
 
+/// shutdown.exe 全路径（SystemRoot\System32），避免依赖 PATH 被劫持。
+fn shutdown_exe() -> PathBuf {
+    std::env::var_os("SystemRoot")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(r"C:\Windows"))
+        .join("System32")
+        .join("shutdown.exe")
+}
+
 /// 关机（立即）。
 pub fn shutdown() {
-    let _ = std::process::Command::new("shutdown")
+    let _ = std::process::Command::new(shutdown_exe())
         .args(["/s", "/t", "0"])
         .spawn();
 }
 
 /// 重启（立即）。
 pub fn reboot() {
-    let _ = std::process::Command::new("shutdown")
+    let _ = std::process::Command::new(shutdown_exe())
         .args(["/r", "/t", "0"])
         .spawn();
 }

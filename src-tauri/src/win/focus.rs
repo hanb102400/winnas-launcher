@@ -6,14 +6,15 @@
 //! M2 实现核心闭环：程序退出（process.rs 的 Job 检测）→ `schedule_reclaim` 延时夺焦。
 //! 防系统弹窗/通知抢焦的主动夺回（`AttachThreadInput` + 白名单）在 M3 完善。
 
-use std::sync::atomic::{AtomicIsize, Ordering};
+use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::time::Duration;
 
 use windows::Win32::Foundation::HWND;
 use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
     SetForegroundWindow, SystemParametersInfoW, EVENT_SYSTEM_FOREGROUND,
-    SPI_SETFOREGROUNDLOCKTIMEOUT, SPIF_SENDCHANGE, WINEVENT_OUTOFCONTEXT,
+    SPI_GETFOREGROUNDLOCKTIMEOUT, SPI_SETFOREGROUNDLOCKTIMEOUT, SPIF_SENDCHANGE,
+    WINEVENT_OUTOFCONTEXT,
 };
 
 use super::{state, window};
@@ -21,6 +22,9 @@ use super::{state, window};
 /// 最近一次前台窗口句柄（`EVENT_SYSTEM_FOREGROUND` 回调记录；权威信号，
 /// 进程强杀后 `GetForegroundWindow` 有短暂失效期，见 PoC3 结论）。
 static FOREGROUND_HWND: AtomicIsize = AtomicIsize::new(0);
+
+/// 启动前的原始前台锁定超时（毫秒），退出时还原该全局用户参数。
+static ORIG_FG_LOCK_TIMEOUT: AtomicU32 = AtomicU32::new(200_000);
 
 unsafe extern "system" fn on_foreground(
     _hook: HWINEVENTHOOK,
@@ -55,6 +59,18 @@ unsafe extern "system" fn on_foreground(
 pub fn init(hwnd: HWND) {
     state::set_launcher_hwnd(hwnd.0 as isize);
     unsafe {
+        // 记录原始前台锁定超时（全局用户参数），退出时在 restore_foreground_lock_timeout 还原
+        let mut orig: u32 = 0;
+        if SystemParametersInfoW(
+            SPI_GETFOREGROUNDLOCKTIMEOUT,
+            0,
+            Some(&mut orig as *mut u32 as *mut core::ffi::c_void),
+            Default::default(),
+        )
+        .is_ok()
+        {
+            ORIG_FG_LOCK_TIMEOUT.store(orig, Ordering::SeqCst);
+        }
         // SPI_SETFOREGROUNDLOCKTIMEOUT：新值在 uiParam，pvParam 必须为 NULL（PoC3 已修正）
         let _ = SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, None, SPIF_SENDCHANGE);
         // 钩子泄漏到进程结束（系统自动清理），不显式卸载
@@ -94,5 +110,13 @@ fn reclaim() {
         // 置顶 + 激活（Launcher 未隐藏，直接恢复最前）
         window::topmost(hwnd);
         let _ = SetForegroundWindow(hwnd);
+    }
+}
+
+/// 还原前台锁定超时到启动前的原始值（由 lib.rs 的 RunEvent::Exit 调用）。
+pub fn restore_foreground_lock_timeout() {
+    let orig = ORIG_FG_LOCK_TIMEOUT.load(Ordering::SeqCst);
+    unsafe {
+        let _ = SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, orig, None, SPIF_SENDCHANGE);
     }
 }

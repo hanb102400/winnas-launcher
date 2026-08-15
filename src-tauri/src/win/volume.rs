@@ -16,7 +16,11 @@ const CLSID_MMDEVICE_ENUMERATOR: GUID =
 
 fn endpoint_volume() -> Option<IAudioEndpointVolume> {
     unsafe {
-        let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        // STA 初始化（S_OK=本次初始化 / S_FALSE=线程已初始化）；RPC_E_CHANGED_MODE 等错误则放弃
+        let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        if hr.is_err() {
+            return None;
+        }
         let enumerator: IMMDeviceEnumerator =
             CoCreateInstance(&CLSID_MMDEVICE_ENUMERATOR, None, CLSCTX_ALL).ok()?;
         let device = enumerator.GetDefaultAudioEndpoint(eRender, eConsole).ok()?;
