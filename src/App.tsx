@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import "./App.css";
@@ -48,7 +48,16 @@ function App() {
   const [showKeymap, setShowKeymap] = useState(false);
   const [manageMode, setManageMode] = useState(false);
   const [manageTarget, setManageTarget] = useState<AppItem | null>(null);
-  const [manageAction, setManageAction] = useState(0); // 0=删除 1=移到最前 2=移到最后 3=取消
+  const [manageAction, setManageAction] = useState(0); // 0=删除 1=改名 2=移到最前 3=移到最后 4=取消
+  const [renaming, setRenaming] = useState(false);
+  const [renameTarget, setRenameTarget] = useState<AppItem | null>(null);
+  const [renameInput, setRenameInput] = useState("");
+  const [renameFocus, setRenameFocus] = useState(0); // 0=输入框 1=确认 2=取消
+  const [maintenance, setMaintenance] = useState(false);
+  const backDown = useRef(false);
+  const menuDown = useRef(false);
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const renameInputRef = useRef<HTMLInputElement>(null);
   const [settingsFocus, setSettingsFocus] = useState(0); // 设置抽屉内焦点索引
   const [clock, setClock] = useState(() => new Date());
   const [firstRun, setFirstRun] = useState(false); // 首次启动引导
@@ -140,7 +149,7 @@ function App() {
     setSettingsFocus(0);
   }, []);
 
-  // 执行管理操作（删除/移到最前/移到最后/取消）
+  // 执行管理操作（删除/改名/移到最前/移到最后/取消）
   const executeManageAction = useCallback(async () => {
     if (!manageTarget) return;
     const exe = manageTarget.exe;
@@ -152,10 +161,17 @@ function App() {
           setToast(`已删除 ${manageTarget.name}`);
           break;
         case 1:
+          // 改名：关闭操作菜单，进入改名输入状态
+          setRenameTarget(manageTarget);
+          setRenameInput(manageTarget.name);
+          setManageTarget(null);
+          setRenaming(true);
+          return;
+        case 2:
           list = await invoke<AppItem[]>("move_app_to_front", { exe });
           setToast(`已移到最前：${manageTarget.name}`);
           break;
-        case 2:
+        case 3:
           list = await invoke<AppItem[]>("move_app_to_end", { exe });
           setToast(`已移到最后：${manageTarget.name}`);
           break;
@@ -168,6 +184,70 @@ function App() {
     }
     setManageTarget(null);
   }, [manageTarget, manageAction, apps]);
+
+  // 确认改名
+  const confirmRename = useCallback(async () => {
+    if (!renameTarget) return;
+    const name = renameInput.trim();
+    if (!name) return;
+    try {
+      const list = await invoke<AppItem[]>("rename_app", { exe: renameTarget.exe, name });
+      setApps(list);
+      setToast(`已重命名为 ${name}`);
+    } catch (e) {
+      setToast(`改名失败: ${e}`);
+    }
+    setRenaming(false);
+    setRenameTarget(null);
+  }, [renameTarget, renameInput]);
+
+  // 进入/退出维护模式（长按 Back+Menu 触发，见设计文档 6.1）
+  const toggleMaintenance = useCallback(async () => {
+    if (maintenance) {
+      await invoke("exit_maintenance");
+      setMaintenance(false);
+      setToast("已退出维护模式");
+    } else {
+      await invoke("enter_maintenance");
+      setMaintenance(true);
+      setToast("已进入维护模式（任务栏已恢复，可调试桌面）");
+    }
+  }, [maintenance]);
+
+  // 长按「返回 + 菜单」5 秒进入/退出维护模式
+  useEffect(() => {
+    const isBack = (k: string) => k === "Escape" || k === "Backspace" || k === "BrowserBack";
+    const isMenu = (k: string) => k === "F1" || k === "ContextMenu";
+
+    const down = (e: KeyboardEvent) => {
+      if (isBack(e.key)) backDown.current = true;
+      if (isMenu(e.key)) menuDown.current = true;
+      if (backDown.current && menuDown.current && !longPressTimer.current) {
+        longPressTimer.current = setTimeout(() => {
+          if (backDown.current && menuDown.current) {
+            toggleMaintenance();
+          }
+          longPressTimer.current = null;
+        }, 5000);
+      }
+    };
+    const up = (e: KeyboardEvent) => {
+      if (isBack(e.key)) backDown.current = false;
+      if (isMenu(e.key)) menuDown.current = false;
+      if (!(backDown.current && menuDown.current) && longPressTimer.current) {
+        clearTimeout(longPressTimer.current);
+        longPressTimer.current = null;
+      }
+    };
+
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+      if (longPressTimer.current) clearTimeout(longPressTimer.current);
+    };
+  }, [toggleMaintenance]);
 
   const toggleAutostart = useCallback(async () => {
     const next = !autostart;
@@ -306,6 +386,12 @@ function App() {
   // 遥控/键盘焦点导航（二维网格 + 分页翻页，见设计文档 5.3）
   const onKeyDown = useCallback(
     (e: KeyboardEvent) => {
+      // 长按 Back+Menu 期间，跳过单按处理（等长按计时器触发维护模式）
+      if (backDown.current && menuDown.current) {
+        e.preventDefault();
+        return;
+      }
+
       // 首次启动引导窗：左右切换，Enter 确认
       if (firstRun) {
         switch (e.key) {
@@ -374,11 +460,41 @@ function App() {
         return;
       }
 
+      // 改名输入框：方向键在输入框/确认/取消间导航，Enter 确认，Esc 取消
+      if (renaming) {
+        switch (e.key) {
+          case "ArrowDown":
+            setRenameFocus((f) => Math.min(f + 1, 2));
+            break;
+          case "ArrowUp":
+            setRenameFocus((f) => {
+              const next = Math.max(f - 1, 0);
+              if (next === 0) renameInputRef.current?.focus();
+              return next;
+            });
+            break;
+          case "Enter":
+            if (renameFocus === 2) {
+              setRenaming(false);
+            } else {
+              confirmRename();
+            }
+            break;
+          case "Escape":
+          case "Backspace":
+          case "BrowserBack":
+            setRenaming(false);
+            break;
+        }
+        e.preventDefault();
+        return;
+      }
+
       // 管理 APP 操作菜单：方向键选择，Enter 执行，Esc 取消
       if (manageTarget) {
         switch (e.key) {
           case "ArrowDown":
-            setManageAction((f) => Math.min(f + 1, 3));
+            setManageAction((f) => Math.min(f + 1, 4));
             break;
           case "ArrowUp":
             setManageAction((f) => Math.max(f - 1, 0));
@@ -444,6 +560,7 @@ function App() {
       if (gearFocused) {
         switch (e.key) {
           case "ArrowDown":
+          case "ArrowLeft":
             setGearFocused(false); // 回到网格
             break;
           case "Enter":
@@ -565,6 +682,9 @@ function App() {
       manageTarget,
       manageAction,
       executeManageAction,
+      renaming,
+      renameInput,
+      confirmRename,
       exitManageMode,
       settingsOpen,
       settingsFocus,
@@ -653,9 +773,11 @@ function App() {
 
       {/* 提示条 */}
       <div className="hint">
-        {manageMode
-          ? "管理模式 · Enter 编辑 · 返回键退出"
-          : "← → ↑ ↓ 切换 · Enter 启动 · F1/菜单 设置"}
+        {maintenance
+          ? "维护模式中 · 长按返回+菜单 5 秒退出"
+          : manageMode
+            ? "管理模式 · Enter 编辑 · 返回键退出"
+            : "← → ↑ ↓ 切换 · Enter 启动 · F1/菜单 设置"}
       </div>
 
       {/* Toast */}
@@ -845,7 +967,7 @@ function App() {
                 }}
                 onMouseEnter={() => setManageAction(1)}
               >
-                ⬆️ 移到最前
+                ✏️ 改名
               </button>
               <button
                 className={`modal-btn ${manageAction === 2 ? "focused" : ""}`}
@@ -855,16 +977,69 @@ function App() {
                 }}
                 onMouseEnter={() => setManageAction(2)}
               >
-                ⬇️ 移到最后
+                ⬆️ 移到最前
               </button>
               <button
                 className={`modal-btn ${manageAction === 3 ? "focused" : ""}`}
-                onClick={() => setManageTarget(null)}
+                onClick={() => {
+                  setManageAction(3);
+                  executeManageAction();
+                }}
                 onMouseEnter={() => setManageAction(3)}
+              >
+                ⬇️ 移到最后
+              </button>
+              <button
+                className={`modal-btn ${manageAction === 4 ? "focused" : ""}`}
+                onClick={() => setManageTarget(null)}
+                onMouseEnter={() => setManageAction(4)}
               >
                 ← 取消
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* 改名弹窗 */}
+      {renaming && renameTarget && (
+        <div className="modal-overlay">
+          <div className="modal">
+            <h2>重命名「{renameTarget.name}」</h2>
+            <div className="manual-add">
+              <input
+                ref={renameInputRef}
+                className="manual-input"
+                value={renameInput}
+                autoFocus
+                onChange={(e) => setRenameInput(e.target.value)}
+                onKeyDown={(e) => {
+                  e.stopPropagation();
+                  if (e.key === "Enter") {
+                    confirmRename();
+                  } else if (e.key === "Escape") {
+                    setRenaming(false);
+                  } else if (e.key === "ArrowDown") {
+                    setRenameFocus(1);
+                    e.currentTarget.blur();
+                  }
+                }}
+              />
+              <button
+                className={`modal-btn primary ${renameFocus === 1 ? "focused" : ""}`}
+                onClick={confirmRename}
+                onMouseEnter={() => setRenameFocus(1)}
+              >
+                确认
+              </button>
+            </div>
+            <button
+              className={`modal-btn ${renameFocus === 2 ? "focused" : ""}`}
+              onClick={() => setRenaming(false)}
+              onMouseEnter={() => setRenameFocus(2)}
+            >
+              ← 取消
+            </button>
           </div>
         </div>
       )}

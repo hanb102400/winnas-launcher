@@ -21,9 +21,12 @@ pub struct AppItem {
     /// 打开次数（每次启动 +1，首页按此降序排序）
     #[serde(default)]
     pub launch_count: u32,
-    /// 固定标记（手动「移到最前/最后」后为 true，排序时固定项优先保持手动顺序）
+    /// 固定标记（手动「移到最前」后为 true，排到最前）
     #[serde(default)]
     pub pinned: bool,
+    /// 移到最后标记（手动「移到最后」后为 true，排到所有项最后）
+    #[serde(default)]
+    pub pinned_end: bool,
 }
 
 /// 程序默认配置项。
@@ -138,17 +141,27 @@ pub fn load_apps() -> Vec<AppItem> {
     apps
 }
 
-/// 排序：固定项（pinned）按手动顺序排前，非固定项按打开次数降序 + 名称升序排后。
+/// 排序：移到最前（pinned）排最前，移到最后（pinned_end）排最后，其余按打开次数降序 + 名称升序排中间。
 fn sort_apps(apps: &mut [AppItem]) {
-    let mut pinned: Vec<AppItem> = apps.iter().filter(|a| a.pinned).cloned().collect();
-    let mut unpinned: Vec<AppItem> = apps.iter().filter(|a| !a.pinned).cloned().collect();
-    unpinned.sort_by(|a, b| {
+    let mut front: Vec<AppItem> = apps
+        .iter()
+        .filter(|a| a.pinned && !a.pinned_end)
+        .cloned()
+        .collect();
+    let mut middle: Vec<AppItem> = apps
+        .iter()
+        .filter(|a| !a.pinned && !a.pinned_end)
+        .cloned()
+        .collect();
+    let end: Vec<AppItem> = apps.iter().filter(|a| a.pinned_end).cloned().collect();
+    middle.sort_by(|a, b| {
         b.launch_count
             .cmp(&a.launch_count)
             .then_with(|| a.name.cmp(&b.name))
     });
-    pinned.extend(unpinned);
-    apps.clone_from_slice(&pinned);
+    front.extend(middle);
+    front.extend(end);
+    apps.clone_from_slice(&front);
 }
 
 /// 增加指定 exe 路径的打开次数。
@@ -166,6 +179,7 @@ pub fn move_to_front(exe: &str) {
     if let Some(i) = apps.iter().position(|a| a.exe == exe) {
         let mut app = apps.remove(i);
         app.pinned = true;
+        app.pinned_end = false;
         apps.insert(0, app);
         save_apps(&apps);
     }
@@ -176,7 +190,8 @@ pub fn move_to_end(exe: &str) {
     let mut apps = load_apps();
     if let Some(i) = apps.iter().position(|a| a.exe == exe) {
         let mut app = apps.remove(i);
-        app.pinned = true;
+        app.pinned = false;
+        app.pinned_end = true;
         apps.push(app);
         save_apps(&apps);
     }
@@ -187,6 +202,15 @@ pub fn remove_app(exe: &str) {
     let mut apps = load_apps();
     apps.retain(|a| a.exe != exe);
     save_apps(&apps);
+}
+
+/// 重命名应用。
+pub fn rename_app(exe: &str, new_name: &str) {
+    let mut apps = load_apps();
+    if let Some(app) = apps.iter_mut().find(|a| a.exe == exe) {
+        app.name = new_name.to_string();
+        save_apps(&apps);
+    }
 }
 
 /// 写网格菜单列表（排序 + 写内存缓存 + apps.json）。

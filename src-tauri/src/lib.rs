@@ -197,6 +197,14 @@ fn move_app_to_end(exe: String) -> Vec<win::config::AppItem> {
     win::config::load_apps()
 }
 
+/// 管理 APP：重命名应用。
+#[tauri::command]
+fn rename_app(exe: String, name: String) -> Vec<win::config::AppItem> {
+    win::log::info("apps", &format!("重命名应用: {exe} -> {name}"));
+    win::config::rename_app(&exe, &name);
+    win::config::load_apps()
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let app = tauri::Builder::default()
@@ -259,7 +267,8 @@ pub fn run() {
             exit_maintenance,
             remove_app,
             move_app_to_front,
-            move_app_to_end
+            move_app_to_end,
+            rename_app
         ])
         .build(tauri::generate_context!())
         .expect("error while building tauri application");

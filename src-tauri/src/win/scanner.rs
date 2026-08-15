@@ -91,6 +91,7 @@ fn scan_uninstall(hive: HKEY, path: &str, apps: &mut Vec<AppItem>, seen: &mut Ha
                 icon,
                 launch_count: 0,
                 pinned: false,
+                pinned_end: false,
             });
         }
     }
@@ -146,7 +147,7 @@ fn scan_lnk_dir(dir: &Path, apps: &mut Vec<AppItem>, seen: &mut HashSet<String>)
             if seen.insert(name.clone()) {
                 let exe = path.to_string_lossy().to_string();
                 let icon = icon::extract_icon_data_url(&exe).unwrap_or_default();
-                apps.push(AppItem { name, exe, icon, launch_count: 0, pinned: false });
+                apps.push(AppItem { name, exe, icon, launch_count: 0, pinned: false, pinned_end: false });
             }
         }
     }

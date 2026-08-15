@@ -4,8 +4,6 @@
 
 开机直达全屏应用网格，用遥控器/键盘方向键操作，启动你的 Kodi、Jellyfin、播放器、游戏等，无需键鼠。
 
-> 💡 **推荐搭配**：配合 Kodi、Jellyfin、Steam（大屏幕模式）等**原生支持全程遥控器操作**的应用，可获得完整 HTPC 体验。详见下方「推荐应用」。
-
 ## ✨ 特性
 
 - 🖥️ **无边框独占全屏** — 开机即全屏置顶，直达 Launcher，不看到 Windows 桌面
@@ -19,72 +17,9 @@
 - 🛡️ **崩溃自恢复** — 崩溃自动重启 + 系统状态快照自愈（强杀后下次启动自动恢复任务栏/桌面）
 - 💾 **双形态分发** — 常规安装版 + 绿色便携版（不写注册表、不写 APPDATA）
 
-## 📺 推荐应用（HTPC 遥控器友好）
-
-以下 Windows 应用**原生支持全程遥控器/手柄操作**，无需键鼠，配合 WinNas Launcher 可获得最佳电视体验：
-
-**媒体中心 / 播放器**
-
-| 应用 | 说明 |
-|------|------|
-| [Kodi](https://kodi.tv) | 开源媒体中心，遥控器体验最佳，本地/网络媒体库、插件生态丰富 |
-| [Jellyfin Media Player](https://jellyfin.org) | 开源媒体客户端，搭配 Jellyfin 服务端，支持硬件解码 |
-| [Plex HTPC](https://www.plex.tv) | 媒体服务器客户端，大屏 TV 模式 |
-| [Emby Theater](https://emby.media) | 媒体客户端，遥控器导航 |
-| [JRiver Media Center](https://jriver.com) | 专业媒体库管理，原生遥控器支持 |
-| [MPC-BE](https://sourceforge.net/projects/mpcbe) / MPC-HC | 轻量媒体播放器，可映射遥控器 |
-| [VLC](https://www.videolan.org/vlc) | 通用播放器，全屏模式 |
-
-**游戏平台 / 游戏库**
-
-| 应用 | 说明 |
-|------|------|
-| [Steam](https://store.steampowered.com) | 大屏幕模式（Big Picture）原生支持手柄/遥控器，游戏库一体化 |
-| [Playnite](https://playnite.link) | 开源游戏库整合，全屏模式，多平台游戏统一管理 |
-| [GOG Galaxy](https://www.gog.com/galaxy) | 游戏平台，大屏模式 |
-
-**游戏串流**
-
-| 应用 | 说明 |
-|------|------|
-| [Moonlight](https://moonlight-stream.org) | 串流 PC 游戏（配 Sunshine 服务端），手柄/遥控器 |
-| [Parsec](https://parsec.app) | 低延迟游戏串流 |
-
-**模拟器**
-
-| 应用 | 说明 |
-|------|------|
-| [RetroArch](https://www.retroarch.com) | 多平台模拟器整合，海量核心，手柄/遥控器导航 |
-| [Dolphin](https://dolphin-emu.org) | NGC / Wii 模拟器 |
-| [PCSX2](https://pcsx2.net) | PS2 模拟器 |
-| [RPCS3](https://rpcs3.net) | PS3 模拟器 |
-| [DuckStation](https://www.duckstation.org) | PS1 模拟器 |
-| [PPSSPP](https://www.ppsspp.org) | PSP 模拟器 |
-| [MAME](https://www.mamedev.org) | 街机模拟器 |
-
-**流媒体 / 直播**
-
-| 应用 | 说明 |
-|------|------|
-| Netflix（Windows 商店版） | 遥控器友好，大屏观影 |
-| YouTube（TV 模式） | 大屏视频 |
-| Prime Video / Disney+ / Apple TV+（Windows 商店版） | 遥控器友好 |
-| [HDHomeRun](https://www.silicondust.com) | 电视调谐器直播 |
-| [NextPVR](https://nextpvr.com) | 个人录像 / 直播 |
-
-**音乐**
-
-| 应用 | 说明 |
-|------|------|
-| [Spotify](https://www.spotify.com) | 音乐播放，大屏模式 |
-| [Plexamp](https://plexamp.com) | Plex 音乐播放器 |
-| [Deezer](https://www.deezer.com) | 音乐流媒体 |
-
-> 这些应用在 WinNas Launcher 首页网格里添加后，即可用遥控器一键启动、退出后自动回到 Launcher。模拟器类建议配合手柄（WinNas Launcher 已支持游戏手柄输入，见特性）。
-
 ## 🖥️ 界面
 
-- **首页**：居中 6×3 应用网格（分页），右上角时钟 + 设置齿轮
+- **首页**：居中 6×4 应用网格（分页），右上角时钟 + 设置齿轮
 - **设置抽屉**：恢复桌面、清除菜单缓存、开机自启、添加 APP、按键说明、系统操作、退出、维护模式
 - **首次启动引导**：选择「加载全部菜单」（扫描开始菜单程序）或「不加载菜单」（手动添加）
 
@@ -205,6 +140,70 @@ winnas-launcher/
 1. 检查 **BIOS** 里是否启用了「USB Wake from S3 / Resume by USB」；
 2. 打开「设备管理器」→ 找到遥控器接收器（USB 输入设备 / 蓝牙 / HID）→ 右键 → 属性 → 「电源管理」选项卡 → 勾选「**允许此设备唤醒计算机**」；
 3. 运行 `powercfg /a` 确认系统支持 **S3**（若只有 S0 现代待机，则是系统架构决定，无法强制 S3）。
+
+## 🧩 推荐搭配使用应用
+
+以下 Windows 应用**原生支持全程遥控器/手柄操作**，无需键鼠，配合 WinNas Launcher 可获得最佳电视体验：
+
+**媒体中心 / 播放器**
+
+| 应用 | 说明 |
+|------|------|
+| [Kodi](https://kodi.tv) | 开源媒体中心，遥控器体验最佳，本地/网络媒体库、插件生态丰富 |
+| [Jellyfin Media Player](https://jellyfin.org) | 开源媒体客户端，搭配 Jellyfin 服务端，支持硬件解码 |
+| [Plex HTPC](https://www.plex.tv) | 媒体服务器客户端，大屏 TV 模式 |
+| [Emby Theater](https://emby.media) | 媒体客户端，遥控器导航 |
+| [JRiver Media Center](https://jriver.com) | 专业媒体库管理，原生遥控器支持 |
+| [MPC-BE](https://sourceforge.net/projects/mpcbe) / MPC-HC | 轻量媒体播放器，可映射遥控器 |
+| [VLC](https://www.videolan.org/vlc) | 通用播放器，全屏模式 |
+
+**游戏平台 / 游戏库**
+
+| 应用 | 说明 |
+|------|------|
+| [Steam](https://store.steampowered.com) | 大屏幕模式（Big Picture）原生支持手柄/遥控器，游戏库一体化 |
+| [Playnite](https://playnite.link) | 开源游戏库整合，全屏模式，多平台游戏统一管理 |
+| [GOG Galaxy](https://www.gog.com/galaxy) | 游戏平台，大屏模式 |
+
+**游戏串流**
+
+| 应用 | 说明 |
+|------|------|
+| [Moonlight](https://moonlight-stream.org) | 串流 PC 游戏（配 Sunshine 服务端），手柄/遥控器 |
+| [Parsec](https://parsec.app) | 低延迟游戏串流 |
+
+**模拟器**
+
+| 应用 | 说明 |
+|------|------|
+| [RetroArch](https://www.retroarch.com) | 多平台模拟器整合，海量核心，手柄/遥控器导航 |
+| [Dolphin](https://dolphin-emu.org) | NGC / Wii 模拟器 |
+| [PCSX2](https://pcsx2.net) | PS2 模拟器 |
+| [RPCS3](https://rpcs3.net) | PS3 模拟器 |
+| [DuckStation](https://www.duckstation.org) | PS1 模拟器 |
+| [PPSSPP](https://www.ppsspp.org) | PSP 模拟器 |
+| [MAME](https://www.mamedev.org) | 街机模拟器 |
+
+**流媒体 / 直播**
+
+| 应用 | 说明 |
+|------|------|
+| Netflix（Windows 商店版） | 遥控器友好，大屏观影 |
+| YouTube（TV 模式） | 大屏视频 |
+| Prime Video / Disney+ / Apple TV+（Windows 商店版） | 遥控器友好 |
+| [HDHomeRun](https://www.silicondust.com) | 电视调谐器直播 |
+| [NextPVR](https://nextpvr.com) | 个人录像 / 直播 |
+
+**音乐**
+
+| 应用 | 说明 |
+|------|------|
+| [Spotify](https://www.spotify.com) | 音乐播放，大屏模式 |
+| [Plexamp](https://plexamp.com) | Plex 音乐播放器 |
+| [Deezer](https://www.deezer.com) | 音乐流媒体 |
+| [MusicBee](https://getmusicbee.com) | 本地音乐库管理，功能全面 |
+
+> 这些应用在 WinNas Launcher 首页网格里添加后，即可用遥控器一键启动、退出后自动回到 Launcher。模拟器类建议配合手柄（WinNas Launcher 已支持游戏手柄输入）。
 
 ## 📄 许可证
 
