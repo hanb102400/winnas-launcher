@@ -1,0 +1,42 @@
+[package]
+name = "winnas-m0-poc"
+version = "0.1.0"
+edition = "2021"
+description = "WinNas Launcher M0 PoC - 5 key technical validations"
+
+[[bin]]
+name = "poc1_fullscreen"
+path = "src/bin/poc1_fullscreen.rs"
+
+[[bin]]
+name = "poc2_keyhook"
+path = "src/bin/poc2_keyhook.rs"
+
+[[bin]]
+name = "poc3_focus"
+path = "src/bin/poc3_focus.rs"
+
+[[bin]]
+name = "poc4_job"
+path = "src/bin/poc4_job.rs"
+
+[[bin]]
+name = "poc5_input"
+path = "src/bin/poc5_input.rs"
+
+[dependencies]
+gilrs = "0.11"
+webview2-com = "0.39"
+windows = { version = "0.62", features = [
+  "Win32_Foundation",
+  "Win32_Graphics_Gdi",
+  "Win32_System_Com",
+  "Win32_Security",
+  "Win32_System_JobObjects",
+  "Win32_System_LibraryLoader",
+  "Win32_System_Threading",
+  "Win32_UI_Accessibility",
+  "Win32_UI_HiDpi",
+  "Win32_UI_Input_KeyboardAndMouse",
+  "Win32_UI_WindowsAndMessaging",
+] }

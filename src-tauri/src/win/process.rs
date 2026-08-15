@@ -1,0 +1,292 @@
+//! 启动外部程序 + 进程树退出检测（设计文档 4.9）
+//!
+//! 每程序一个 Job Object（`KILL_ON_JOB_CLOSE`），进程树全部退出（active=0）时 Job 句柄 signaled，
+//! 天然覆盖"父进程退出、子进程存活"场景（Steam / 模拟器 / 启动器）。已由 M0 PoC4 验证。
+//!
+//! 退出后递减运行计数；归零则 `AppRunning=false` 并触发 focus 延时夺焦（4.8）。
+
+use std::sync::atomic::{AtomicIsize, Ordering};
+use std::time::Duration;
+
+use windows::core::{w, BOOL, PCWSTR};
+use windows::Win32::Foundation::{CloseHandle, HANDLE, HWND, LPARAM, WAIT_OBJECT_0};
+use windows::Win32::System::JobObjects::{
+    AssignProcessToJobObject, CreateJobObjectW, JobObjectExtendedLimitInformation,
+    SetInformationJobObject, JOBOBJECT_BASIC_LIMIT_INFORMATION,
+    JOBOBJECT_EXTENDED_LIMIT_INFORMATION, JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+};
+use windows::Win32::System::Diagnostics::ToolHelp::{
+    CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
+};
+use windows::Win32::System::Threading::{
+    CreateProcessW, GetProcessId, WaitForSingleObject, STARTUPINFOW, PROCESS_INFORMATION,
+};
+use windows::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOCLOSEPROCESS};
+use windows::Win32::UI::WindowsAndMessaging::{
+    BringWindowToTop, EnumWindows, GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId,
+    IsWindowVisible, SetForegroundWindow, SetWindowPos, ShowWindow, HWND_NOTOPMOST, HWND_TOPMOST,
+    SWP_NOMOVE, SWP_NOSIZE, SWP_SHOWWINDOW, SW_RESTORE, SW_SHOWNORMAL,
+};
+
+use super::{focus, state, window};
+
+static FOUND_HWND: AtomicIsize = AtomicIsize::new(0);
+
+unsafe extern "system" fn enum_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
+    let target_pid = lparam.0 as u32;
+    let mut pid = 0u32;
+    GetWindowThreadProcessId(hwnd, Some(&mut pid));
+    if pid == target_pid && IsWindowVisible(hwnd).as_bool() {
+        FOUND_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
+        return BOOL(0); // 停止枚举
+    }
+    BOOL(1) // 继续
+}
+
+/// 找进程的第一个可见主窗口。
+fn find_main_window(pid: u32) -> Option<HWND> {
+    unsafe {
+        FOUND_HWND.store(0, Ordering::SeqCst);
+        let _ = EnumWindows(Some(enum_proc), LPARAM(pid as isize)).ok();
+        let h = FOUND_HWND.load(Ordering::SeqCst);
+        if h != 0 {
+            Some(HWND(h as *mut core::ffi::c_void))
+        } else {
+            None
+        }
+    }
+}
+
+/// 检测是否有与 `exe_path` 同名的进程已在运行，返回其 PID。
+fn find_running_process(exe_path: &str) -> Option<u32> {
+    let exe_name = std::path::Path::new(exe_path)
+        .file_name()?
+        .to_string_lossy()
+        .to_lowercase();
+    unsafe {
+        let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
+        let mut entry = PROCESSENTRY32W::default();
+        entry.dwSize = std::mem::size_of::<PROCESSENTRY32W>() as u32;
+        let mut found = None;
+        if Process32FirstW(snapshot, &mut entry).is_ok() {
+            loop {
+                let len = entry.szExeFile.iter().position(|&c| c == 0).unwrap_or(0);
+                let name = String::from_utf16_lossy(&entry.szExeFile[..len]).to_lowercase();
+                if name == exe_name {
+                    found = Some(entry.th32ProcessID);
+                    break;
+                }
+                if Process32NextW(snapshot, &mut entry).is_err() {
+                    break;
+                }
+            }
+        }
+        let _ = CloseHandle(snapshot);
+        found
+    }
+}
+
+/// 启动后异步把前台给程序主窗口（`CreateProcessW` 启动的程序不会自动抢前台，
+/// 而 Launcher 全屏置顶会挡住它，需主动激活）。
+///
+/// 可靠激活序列：取消 Launcher 置顶 → 恢复目标窗口 → 临时置顶目标窗口（topmost 必然在最前）→ 激活。
+fn bring_to_foreground(pid: u32) {
+    std::thread::spawn(move || {
+        for _ in 0..50 {
+            // 最多轮询 5 秒等窗口出现
+            if let Some(hwnd) = find_main_window(pid) {
+                unsafe {
+                    let mut title = [0u16; 256];
+                    let n = GetWindowTextW(hwnd, &mut title);
+                    let title = String::from_utf16_lossy(&title[..n as usize]);
+                    super::log::info("launch", &format!("激活窗口 pid={pid} 标题=\"{title}\""));
+                    // 1. 取消 Launcher 置顶（让目标窗口能显示最前）
+                    let launcher = state::launcher_hwnd();
+                    if launcher != 0 {
+                        window::not_topmost(HWND(launcher as *mut core::ffi::c_void));
+                    }
+                    // 2. 恢复目标窗口（若最小化）+ 临时置顶（确保显示最前）
+                    let _ = ShowWindow(hwnd, SW_RESTORE);
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(HWND_TOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
+                    );
+                    // 3. 激活目标窗口
+                    let r = SetForegroundWindow(hwnd);
+                    let fg = GetForegroundWindow();
+                    super::log::info(
+                        "launch",
+                        &format!("SetForegroundWindow 返回 {r:?}，前台={fg:?} 目标={hwnd:?}"),
+                    );
+                }
+                // 4. 延时后取消临时置顶 + 提到普通层顶部（避免掉到底层被 Launcher 挡住）
+                std::thread::sleep(Duration::from_millis(600));
+                unsafe {
+                    let _ = SetWindowPos(
+                        hwnd,
+                        Some(HWND_NOTOPMOST),
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE,
+                    );
+                    let _ = BringWindowToTop(hwnd);
+                    let fg_after = GetForegroundWindow();
+                    super::log::info("launch", &format!("取消置顶后前台={fg_after:?}"));
+                }
+                break;
+            }
+            std::thread::sleep(Duration::from_millis(100));
+        }
+    });
+}
+
+/// 创建带 `KILL_ON_JOB_CLOSE` 的 Job（Launcher 崩溃时 OS 回收句柄 → 终止外部程序进程树）。
+unsafe fn create_job() -> windows::core::Result<HANDLE> {
+    let job = CreateJobObjectW(None, w!("WinNasLauncherJob"))?;
+    let mut jeli = JOBOBJECT_EXTENDED_LIMIT_INFORMATION {
+        BasicLimitInformation: JOBOBJECT_BASIC_LIMIT_INFORMATION {
+            LimitFlags: JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    SetInformationJobObject(
+        job,
+        JobObjectExtendedLimitInformation,
+        &mut jeli as *mut _ as *const core::ffi::c_void,
+        core::mem::size_of::<JOBOBJECT_EXTENDED_LIMIT_INFORMATION>() as u32,
+    )?;
+    Ok(job)
+}
+
+/// 启动外部程序（`.exe` / `.lnk`），返回进程 PID（`.lnk` 由 Shell 启动，无法可靠取 PID，返回 0）。
+///
+/// - `.exe`：`CreateProcessW` + Job Object（进程树退出检测，见 4.9）；
+/// - `.lnk`：`ShellExecuteExW`（解析快捷方式启动，见 4.9）。
+pub fn launch(path: &str) -> windows::core::Result<u32> {
+    if path.to_lowercase().ends_with(".lnk") {
+        launch_lnk(path)
+    } else if let Some(pid) = find_running_process(path) {
+        // 同名进程已在运行：激活其窗口，不重复启动
+        super::log::info("launch", &format!("已运行，激活窗口 pid={pid}"));
+        bring_to_foreground(pid);
+        Ok(pid)
+    } else {
+        launch_exe(path)
+    }
+}
+
+/// 启动 `.lnk`（ShellExecuteExW + `SEE_MASK_NOCLOSEPROCESS` 拿 PID），并前台激活。
+fn launch_lnk(path: &str) -> windows::core::Result<u32> {
+    let wide: Vec<u16> = path.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut sei: SHELLEXECUTEINFOW = unsafe { std::mem::zeroed() };
+    sei.cbSize = std::mem::size_of::<SHELLEXECUTEINFOW>() as u32;
+    sei.fMask = SEE_MASK_NOCLOSEPROCESS;
+    sei.lpVerb = w!("open");
+    sei.lpFile = PCWSTR::from_raw(wide.as_ptr());
+    sei.nShow = SW_SHOWNORMAL.0 as i32;
+    unsafe {
+        ShellExecuteExW(&mut sei)?;
+    }
+
+    // 拿 PID（Shell 启动，hProcess 有效）
+    if sei.hProcess.0.is_null() {
+        return Ok(0);
+    }
+    let pid = unsafe { GetProcessId(sei.hProcess) };
+
+    // 更新状态 + 前台激活
+    state::inc_running();
+    state::set_app_running(true);
+    bring_to_foreground(pid);
+
+    // 等进程退出（.lnk 无 Job Object，用 hProcess 句柄）
+    let hprocess_raw = sei.hProcess.0 as usize;
+    std::thread::spawn(move || unsafe {
+        let hprocess = HANDLE(hprocess_raw as *mut core::ffi::c_void);
+        WaitForSingleObject(hprocess, u32::MAX);
+        let _ = CloseHandle(hprocess);
+        let remaining = state::dec_running();
+        if remaining == 0 {
+            state::set_app_running(false);
+            focus::schedule_reclaim();
+        }
+    });
+
+    Ok(pid)
+}
+
+/// 启动一个 `.exe`（CreateProcessW + Job Object），返回进程 PID。
+///
+/// - GUI 程序用普通创建标志即可（`CREATE_NEW_PROCESS_GROUP` 仅对控制台程序有意义，不加）。
+/// - 注意：windows crate 中 `CreateProcessW`/`CreateJobObjectW` 被 `Win32_Security` feature 门控。
+fn launch_exe(exe_path: &str) -> windows::core::Result<u32> {
+    let job = unsafe { create_job()? };
+
+    // lpCommandLine 要求可变 PWSTR：用栈上 Vec<u16> 保活
+    let mut cmd: Vec<u16> = exe_path.encode_utf16().chain(std::iter::once(0)).collect();
+    let mut si = STARTUPINFOW::default();
+    si.cb = std::mem::size_of::<STARTUPINFOW>() as u32;
+    let mut pi = PROCESS_INFORMATION::default();
+
+    unsafe {
+        CreateProcessW(
+            PCWSTR::null(),
+            Some(windows::core::PWSTR(cmd.as_mut_ptr())),
+            None,
+            None,
+            false,
+            Default::default(),
+            None,
+            PCWSTR::null(),
+            &si,
+            &mut pi,
+        )?;
+    }
+    let pid = pi.dwProcessId;
+
+    // 纳入 Job（子进程自动继承 Job 归属，进程树整体追踪）
+    unsafe {
+        AssignProcessToJobObject(job, pi.hProcess)?;
+    }
+
+    // 更新状态：AppRunning
+    state::inc_running();
+    state::set_app_running(true);
+
+    // 主动把前台给程序（程序不会自动抢前台，Launcher 全屏会挡住它）
+    bring_to_foreground(pid);
+
+    // HANDLE 是 *mut c_void 不实现 Send，转原始地址值跨线程传递后重建
+    let job_raw = job.0 as usize;
+    let hthread_raw = pi.hThread.0 as usize;
+    let hprocess_raw = pi.hProcess.0 as usize;
+
+    // 线程等待进程树全部退出（Job active=0 → signaled）
+    std::thread::spawn(move || unsafe {
+        let job = HANDLE(job_raw as *mut core::ffi::c_void);
+        let r = WaitForSingleObject(job, u32::MAX);
+        // 清理
+        let _ = CloseHandle(HANDLE(hthread_raw as *mut core::ffi::c_void));
+        let _ = CloseHandle(HANDLE(hprocess_raw as *mut core::ffi::c_void));
+        let _ = CloseHandle(job);
+
+        if r == WAIT_OBJECT_0 {
+            let remaining = state::dec_running();
+            super::log::info("process", &format!("程序退出，剩余 {remaining} 个进程"));
+            if remaining == 0 {
+                state::set_app_running(false);
+                focus::schedule_reclaim();
+            }
+        }
+    });
+
+    Ok(pid)
+}

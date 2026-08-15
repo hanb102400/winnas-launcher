@@ -1,0 +1,35 @@
+# ── Node ───────────────────────────────
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# ── Rust / Cargo ───────────────────────
+target/
+src-tauri/target/
+poc/target/
+
+# ── Tauri 打包产物（体积大，不入库）────
+src-tauri/target/release/bundle/
+
+# ── 程序运行时生成的文件（便携/安装版运行产物）──
+conf/
+setting.conf
+apps.json
+state_snapshot.json
+*.log
+portable.flag
+
+# ── 编辑器 / IDE ───────────────────────
+.vscode/*
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+
+# ── Claude Code 本地配置 ───────────────
+.claude/
+
+# ── 系统 ───────────────────────────────
+.DS_Store
+Thumbs.db
