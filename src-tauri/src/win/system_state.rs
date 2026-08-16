@@ -21,13 +21,23 @@ pub struct StateSnapshot {
     pub desktop_icons_visible: Option<bool>,
 }
 
+/// 是否为便携版（exe 同目录存在 `portable.flag`）。
+pub fn is_portable() -> bool {
+    if let Ok(exe) = std::env::current_exe() {
+        if let Some(dir) = exe.parent() {
+            return dir.join("portable.flag").exists();
+        }
+    }
+    false
+}
+
 /// 配置目录：
 /// - 便携版（exe 同目录存在 `portable.flag`）：exe 同目录 `conf/`
 /// - 安装版 / 默认：`%APPDATA%\WinNasLauncher\conf\`
 pub fn conf_dir() -> PathBuf {
-    if let Ok(exe) = std::env::current_exe() {
-        if let Some(dir) = exe.parent() {
-            if dir.join("portable.flag").exists() {
+    if is_portable() {
+        if let Ok(exe) = std::env::current_exe() {
+            if let Some(dir) = exe.parent() {
                 return dir.join("conf");
             }
         }

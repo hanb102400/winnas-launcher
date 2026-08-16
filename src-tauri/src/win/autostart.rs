@@ -44,3 +44,21 @@ pub fn disable() -> bool {
         .map(|s| s.success())
         .unwrap_or(false)
 }
+
+/// 应用自启默认值（启动时调用一次）：
+/// - 便携版：默认不自动开启自启；
+/// - 安装版：首次启动默认开启自启，用户显式关闭后不再自动干预。
+pub fn apply_autostart_default() {
+    if super::system_state::is_portable() {
+        return;
+    }
+    let mut config = super::config::get();
+    if config.autostart_initialized || config.autostart {
+        return; // 已初始化过 或 已开启
+    }
+    let ok = enable();
+    config.autostart = ok;
+    config.autostart_initialized = true;
+    super::config::save(&config);
+    super::log::info("autostart", &format!("安装版首次启动，默认开启自启 -> {ok}"));
+}

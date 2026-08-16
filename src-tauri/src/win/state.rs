@@ -28,7 +28,6 @@ static LAUNCHER_HWND: AtomicIsize = AtomicIsize::new(0);
 /// 维护模式标志（恢复任务栏/桌面，关闭置顶与夺焦，便于调试 Windows 桌面）。
 static MAINTENANCE: AtomicBool = AtomicBool::new(false);
 
-#[allow(dead_code)] // M3 焦点防护（on_foreground 主动夺焦）使用
 pub fn app_running() -> bool {
     APP_RUNNING.load(Ordering::SeqCst)
 }
@@ -60,4 +59,30 @@ pub fn maintenance() -> bool {
 
 pub fn set_maintenance(v: bool) {
     MAINTENANCE.store(v, Ordering::SeqCst);
+}
+
+/// 单实例锁：命名互斥量。返回 `false` 表示已有另一实例在运行（调用方应直接退出）。
+///
+/// 句柄有意泄漏：进程存活期间保持互斥量，进程退出时由 OS 回收。
+pub fn acquire_single_instance() -> bool {
+    unsafe {
+        let h = match windows::Win32::System::Threading::CreateMutexW(
+            None,
+            true,
+            windows::core::w!("WinNasLauncher_SingleInstance_Mutex"),
+        ) {
+            Ok(h) => h,
+            // 创建失败则放行（避免误判阻止启动）
+            Err(_) => return true,
+        };
+        let already = windows::Win32::Foundation::GetLastError()
+            == windows::Win32::Foundation::ERROR_ALREADY_EXISTS;
+        if already {
+            let _ = windows::Win32::Foundation::CloseHandle(h);
+            return false;
+        }
+        // HANDLE 为 Copy 且无 Drop，句柄在函数返回后仍保持打开（进程退出时由 OS 回收）
+        let _ = h;
+        true
+    }
 }

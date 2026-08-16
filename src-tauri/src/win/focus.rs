@@ -10,11 +10,12 @@ use std::sync::atomic::{AtomicIsize, AtomicU32, Ordering};
 use std::time::Duration;
 
 use windows::Win32::Foundation::HWND;
+use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
 use windows::Win32::UI::WindowsAndMessaging::{
-    SetForegroundWindow, SystemParametersInfoW, EVENT_SYSTEM_FOREGROUND,
-    SPI_GETFOREGROUNDLOCKTIMEOUT, SPI_SETFOREGROUNDLOCKTIMEOUT, SPIF_SENDCHANGE,
-    WINEVENT_OUTOFCONTEXT,
+    GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow, ShowWindow,
+    SystemParametersInfoW, EVENT_SYSTEM_FOREGROUND, SPI_GETFOREGROUNDLOCKTIMEOUT,
+    SPI_SETFOREGROUNDLOCKTIMEOUT, SPIF_SENDCHANGE, SW_RESTORE, WINEVENT_OUTOFCONTEXT,
 };
 
 use super::{state, window};
@@ -58,6 +59,8 @@ unsafe extern "system" fn on_foreground(
 /// 初始化：保存 Launcher 句柄 + 放宽前台锁定 + 监听前台变化。
 pub fn init(hwnd: HWND) {
     state::set_launcher_hwnd(hwnd.0 as isize);
+    // 初始前台视为 Launcher（窗口显示后由 on_foreground 纠正）
+    FOREGROUND_HWND.store(hwnd.0 as isize, Ordering::SeqCst);
     unsafe {
         // 记录原始前台锁定超时（全局用户参数），退出时在 restore_foreground_lock_timeout 还原
         let mut orig: u32 = 0;
@@ -84,6 +87,8 @@ pub fn init(hwnd: HWND) {
             WINEVENT_OUTOFCONTEXT,
         );
     }
+    // 启动焦点看门狗：Idle 态兜底夺回被其它程序抢占的前台
+    start_watchdog();
 }
 
 /// 延时夺焦（外部程序退出后调用；300~800ms 避开大型程序销毁延迟，见 4.8）。
@@ -94,23 +99,74 @@ pub fn schedule_reclaim() {
     });
 }
 
-/// 主动夺回焦点到 Launcher（恢复显示 + 置顶 + 激活）。
+/// 取 Launcher 窗口句柄（未初始化返回 None）。
+fn launcher_hwnd() -> Option<HWND> {
+    let h = state::launcher_hwnd();
+    if h == 0 {
+        None
+    } else {
+        Some(HWND(h as *mut _))
+    }
+}
+
+/// 把 Launcher 带到最前并激活：恢复显示 + 置顶 + 挂接前台线程绕过前台锁定。
+fn bring_to_front(hwnd: HWND) {
+    unsafe {
+        let _ = ShowWindow(hwnd, SW_RESTORE);
+        window::topmost(hwnd);
+        let fg_thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+        let our_thread = GetCurrentThreadId();
+        let _ = AttachThreadInput(our_thread, fg_thread, true);
+        let _ = SetForegroundWindow(hwnd);
+        let _ = AttachThreadInput(our_thread, fg_thread, false);
+    }
+}
+
+/// 主动夺回焦点到 Launcher（外部程序退出后调用）。
 fn reclaim() {
     // 维护模式：不夺焦（让用户停留在桌面/其他程序）
     if state::maintenance() {
         return;
     }
-    let h = state::launcher_hwnd();
-    if h == 0 {
+    let Some(hwnd) = launcher_hwnd() else {
+        return;
+    };
+    super::log::info("focus", "夺焦恢复 Launcher");
+    bring_to_front(hwnd);
+}
+
+/// Home 键唤起 Launcher（FR-19）：显式用户动作，覆盖 `AppRunning` 态。
+pub fn show_launcher() {
+    // 维护模式：不打扰用户调试桌面（退出维护模式走「长按返回+菜单」）
+    if state::maintenance() {
         return;
     }
-    let hwnd = HWND(h as *mut _);
-    super::log::info("focus", "夺焦恢复 Launcher");
-    unsafe {
-        // 置顶 + 激活（Launcher 未隐藏，直接恢复最前）
-        window::topmost(hwnd);
-        let _ = SetForegroundWindow(hwnd);
-    }
+    let Some(hwnd) = launcher_hwnd() else {
+        return;
+    };
+    super::log::info("focus", "Home 键唤起 Launcher");
+    bring_to_front(hwnd);
+}
+
+/// 焦点看门狗（4.8 兜底）：Idle 态下低频检查前台窗口，
+/// 若前台被其他程序抢占（开机自启时的其它程序/弹窗等）则静默夺回。
+pub fn start_watchdog() {
+    std::thread::spawn(|| loop {
+        std::thread::sleep(Duration::from_millis(1000));
+        // AppRunning 态不干扰外部程序；维护模式不夺
+        if state::app_running() || state::maintenance() {
+            continue;
+        }
+        let Some(launcher) = launcher_hwnd() else {
+            continue;
+        };
+        let fg = FOREGROUND_HWND.load(Ordering::SeqCst);
+        if fg == launcher.0 as isize {
+            continue; // 已在前台
+        }
+        super::log::info("focus", "看门狗夺回焦点");
+        bring_to_front(launcher);
+    });
 }
 
 /// 还原前台锁定超时到启动前的原始值（由 lib.rs 的 RunEvent::Exit 调用）。

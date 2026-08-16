@@ -18,8 +18,9 @@ use windows::Win32::System::Diagnostics::ToolHelp::{
     CreateToolhelp32Snapshot, Process32FirstW, Process32NextW, PROCESSENTRY32W, TH32CS_SNAPPROCESS,
 };
 use windows::Win32::System::Threading::{
-    CreateProcessW, GetProcessId, OpenProcess, QueryFullProcessImageNameW, WaitForSingleObject,
-    PROCESS_INFORMATION, PROCESS_NAME_WIN32, PROCESS_QUERY_LIMITED_INFORMATION, STARTUPINFOW,
+    AttachThreadInput, CreateProcessW, GetCurrentThreadId, GetProcessId, OpenProcess,
+    QueryFullProcessImageNameW, WaitForSingleObject, PROCESS_INFORMATION, PROCESS_NAME_WIN32,
+    PROCESS_QUERY_LIMITED_INFORMATION, STARTUPINFOW,
 };
 use windows::Win32::UI::Shell::{ShellExecuteExW, SHELLEXECUTEINFOW, SEE_MASK_NOCLOSEPROCESS};
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -91,16 +92,23 @@ fn process_full_path(pid: u32) -> Option<String> {
     }
 }
 
+/// 归一化路径用于比较：去 `\\?\` 前缀 + 小写。
+fn normalize_path(p: &str) -> String {
+    p.trim_start_matches("\\\\?\\").to_lowercase()
+}
+
 /// 检测是否有与 `exe_path` 同路径的进程已在运行，返回其 PID。
-/// 先按文件名粗筛，再比对完整镜像路径，避免不同目录同名 exe 误判。
+/// 先按文件名粗筛，再比对完整镜像路径（归一化后），避免不同目录同名 exe 误判。
 fn find_running_process(exe_path: &str) -> Option<u32> {
     let exe_name = std::path::Path::new(exe_path)
         .file_name()?
         .to_string_lossy()
         .to_lowercase();
-    let target_canon = std::fs::canonicalize(exe_path)
-        .map(|p| p.to_string_lossy().to_lowercase())
-        .unwrap_or_else(|_| exe_path.to_lowercase());
+    let target_norm = normalize_path(
+        &std::fs::canonicalize(exe_path)
+            .map(|p| p.to_string_lossy().to_string())
+            .unwrap_or_else(|_| exe_path.to_string()),
+    );
     unsafe {
         let snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0).ok()?;
         let mut entry = PROCESSENTRY32W::default();
@@ -113,7 +121,7 @@ fn find_running_process(exe_path: &str) -> Option<u32> {
                 if name == exe_name {
                     // 同名进程：进一步校验完整路径（拿不到路径时退化为仅按文件名，保留原行为）
                     let same_path = process_full_path(entry.th32ProcessID)
-                        .map(|full| full.to_lowercase() == target_canon)
+                        .map(|full| normalize_path(&full) == target_norm)
                         .unwrap_or(true);
                     if same_path {
                         found = Some(entry.th32ProcessID);
@@ -149,8 +157,13 @@ fn bring_to_foreground(pid: u32) {
                     if launcher != 0 {
                         window::not_topmost(HWND(launcher as *mut core::ffi::c_void));
                     }
-                    // 2. 恢复目标窗口（若最小化）+ 临时置顶（确保显示最前）
+                    // 2. 恢复目标窗口（若最小化）
                     let _ = ShowWindow(hwnd, SW_RESTORE);
+                    // 3. 挂接输入线程，绕过前台锁定限制，确保 SetForegroundWindow 生效
+                    let target_thread = GetWindowThreadProcessId(hwnd, None);
+                    let our_thread = GetCurrentThreadId();
+                    let _ = AttachThreadInput(our_thread, target_thread, true);
+                    let r = SetForegroundWindow(hwnd);
                     let _ = SetWindowPos(
                         hwnd,
                         Some(HWND_TOPMOST),
@@ -160,8 +173,7 @@ fn bring_to_foreground(pid: u32) {
                         0,
                         SWP_NOMOVE | SWP_NOSIZE | SWP_SHOWWINDOW,
                     );
-                    // 3. 激活目标窗口
-                    let r = SetForegroundWindow(hwnd);
+                    let _ = AttachThreadInput(our_thread, target_thread, false);
                     let fg = GetForegroundWindow();
                     super::log::info(
                         "launch",
@@ -210,18 +222,34 @@ unsafe fn create_job() -> windows::core::Result<HANDLE> {
     Ok(job)
 }
 
+/// 把 `.lnk` 解析为目标路径；非 `.lnk` 直接返回原路径。
+fn resolve_target(path: &str) -> String {
+    if path.to_lowercase().ends_with(".lnk") {
+        super::icon::resolve_lnk_target(path).unwrap_or_else(|| path.to_string())
+    } else {
+        path.to_string()
+    }
+}
+
 /// 启动外部程序（`.exe` / `.lnk`），返回进程 PID（`.lnk` 由 Shell 启动，无法可靠取 PID，返回 0）。
 ///
+/// - 先解析 `.lnk` 目标，检测目标是否已在运行：是则激活窗口，不重复启动；
 /// - `.exe`：`CreateProcessW` + Job Object（进程树退出检测，见 4.9）；
 /// - `.lnk`：`ShellExecuteExW`（解析快捷方式启动，见 4.9）。
 pub fn launch(path: &str) -> windows::core::Result<u32> {
+    // 统一 .lnk 与 .exe：解析目标后先检测「已在运行」→ 激活窗口
+    let target = resolve_target(path);
+    if target.to_lowercase().ends_with(".exe") {
+        if let Some(pid) = find_running_process(&target) {
+            super::log::info("launch", &format!("已运行，激活窗口 pid={pid}"));
+            bring_to_foreground(pid);
+            return Ok(pid);
+        }
+    }
+
+    // 未运行：按原类型启动
     if path.to_lowercase().ends_with(".lnk") {
         launch_lnk(path)
-    } else if let Some(pid) = find_running_process(path) {
-        // 同名进程已在运行：激活其窗口，不重复启动
-        super::log::info("launch", &format!("已运行，激活窗口 pid={pid}"));
-        bring_to_foreground(pid);
-        Ok(pid)
     } else {
         launch_exe(path)
     }
@@ -240,8 +268,16 @@ fn launch_lnk(path: &str) -> windows::core::Result<u32> {
         ShellExecuteExW(&mut sei)?;
     }
 
-    // 拿 PID（Shell 启动，hProcess 有效）
+    // Shell 可能通过 DDE 激活已有实例（无进程句柄）：解析目标并尝试切前台
     if sei.hProcess.0.is_null() {
+        let target = resolve_target(path);
+        if target.to_lowercase().ends_with(".exe") {
+            if let Some(pid) = find_running_process(&target) {
+                super::log::info("launch", &format!("Shell 激活已有实例，切换前台 pid={pid}"));
+                bring_to_foreground(pid);
+                return Ok(pid);
+            }
+        }
         return Ok(0);
     }
     let pid = unsafe { GetProcessId(sei.hProcess) };

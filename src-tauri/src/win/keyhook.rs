@@ -9,15 +9,15 @@ use windows::Win32::Foundation::{HINSTANCE, LPARAM, LRESULT, WPARAM};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use tauri::Emitter;
 use windows::Win32::UI::Input::KeyboardAndMouse::{
-    GetAsyncKeyState, VK_CONTROL, VK_D, VK_ESCAPE, VK_F4, VK_LWIN, VK_MENU, VK_RWIN, VK_SHIFT,
-    VK_SLEEP, VK_TAB, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
+    GetAsyncKeyState, VK_BROWSER_HOME, VK_CONTROL, VK_D, VK_ESCAPE, VK_F4, VK_LWIN, VK_MENU,
+    VK_RWIN, VK_SHIFT, VK_SLEEP, VK_TAB, VK_VOLUME_DOWN, VK_VOLUME_MUTE, VK_VOLUME_UP,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     CallNextHookEx, DispatchMessageW, GetMessageW, TranslateMessage, KBDLLHOOKSTRUCT,
     SetWindowsHookExW, UnhookWindowsHookEx, WH_KEYBOARD_LL, MSG,
 };
 
-use super::{log, state, system, volume};
+use super::{focus, log, state, system, volume};
 
 const WM_KEYDOWN: u32 = 0x0100;
 const WM_SYSKEYDOWN: u32 = 0x0104;
@@ -35,6 +35,7 @@ fn classify(vk: u16, win: bool, alt: bool, ctrl: bool, shift: bool) -> Option<&'
         _ if vk == VK_VOLUME_DOWN.0 => return Some("VOL_DOWN"),
         _ if vk == VK_VOLUME_MUTE.0 => return Some("VOL_MUTE"),
         _ if vk == VK_SLEEP.0 => return Some("SLEEP"),
+        _ if vk == VK_BROWSER_HOME.0 => return Some("HOME"),
         _ => {}
     }
     if win {
@@ -79,8 +80,12 @@ fn run_action(name: &'static str) {
         }
         "SLEEP" => {
             // 遥控器电源键 → S3 睡眠（而非关机），吞掉系统默认行为
-            eprintln!("[keyhook] 电源键 → S3 睡眠");
+            log::info("keyhook", "电源键 → S3 睡眠");
             system::sleep();
+        }
+        "HOME" => {
+            // 遥控器 Home 键 → 唤起 Launcher（置顶 + 前台 + 焦点）
+            focus::show_launcher();
         }
         _ => eprintln!("[keyhook] INTERCEPT {name}"),
     });
@@ -103,6 +108,11 @@ unsafe extern "system" fn hook_proc(code: i32, wparam: WPARAM, lparam: LPARAM) -
                 run_action(name);
             }
             return LRESULT(1); // 吞掉该击键，阻止系统处理
+        }
+
+        // 诊断：记录未拦截的特殊键（vk>=0xA6 浏览器/媒体键，或 0x24 Home），定位遥控器电源键实际 VK 码
+        if (msg == WM_KEYDOWN || msg == WM_SYSKEYDOWN) && (vk == 0x24 || vk >= 0xA6) {
+            log::info("keyhook", &format!("未拦截按键 vk=0x{vk:02X}"));
         }
     }
     CallNextHookEx(None, code, wparam, lparam)

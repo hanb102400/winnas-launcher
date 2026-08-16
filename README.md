@@ -27,12 +27,12 @@
 
 ## 📦 下载与安装
 
-> **最新版本 v0.1.0 下载**：
+> **最新版本 v0.1.1 下载**：
 >
 > | 版本 | 下载 |
 > |------|------|
-> | 绿色便携版（推荐，解压即用） | [WinNas-Launcher-portable.zip](https://github.com/hanb102400/winnas-launcher/releases/download/v0.1.0/WinNas-Launcher-portable.zip) |
-> | 常规安装版 | [WinNas Launcher_0.1.0_x64-setup.exe](https://github.com/hanb102400/winnas-launcher/releases/download/v0.1.0/WinNas%20Launcher_0.1.0_x64-setup.exe) |
+> | 绿色便携版（推荐，解压即用） | [WinNas-Launcher-portable.zip](https://github.com/hanb102400/winnas-launcher/releases/download/v0.1.1/WinNas-Launcher-portable.zip) |
+> | 常规安装版 | [WinNas Launcher_0.1.1_x64-setup.exe](https://github.com/hanb102400/winnas-launcher/releases/download/v0.1.1/WinNas%20Launcher_0.1.1_x64-setup.exe) |
 >
 > 历史版本见 [Releases 页面](https://github.com/hanb102400/winnas-launcher/releases)。
 
@@ -45,7 +45,7 @@
 
 ### 方式二：常规安装版
 
-1. 下载 `WinNas Launcher_0.1.0_x64-setup.exe`
+1. 下载 `WinNas Launcher_0.1.1_x64-setup.exe`
 2. 双击安装
 
 安装版配置保存在 `%APPDATA%\WinNasLauncher\conf\`。WebView2 Runtime 缺失时会联网引导下载（Win10/11 通常已内置）。

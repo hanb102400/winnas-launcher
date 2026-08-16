@@ -36,6 +36,7 @@ fn set_autostart(enabled: bool) -> bool {
     if ok {
         let mut config = win::config::get();
         config.autostart = enabled;
+        config.autostart_initialized = true;
         win::config::save(&config);
     }
     win::log::info("autostart", &format!("设置开机自启 {enabled} -> {ok}"));
@@ -209,6 +210,11 @@ fn rename_app(exe: String, name: String) -> Vec<win::config::AppItem> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    // 单实例：已有实例运行时直接退出，避免重复进程
+    if !win::state::acquire_single_instance() {
+        return;
+    }
+
     let app = tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
@@ -230,6 +236,8 @@ pub fn run() {
             win::log::info("boot", "已注册崩溃自动重启");
             // 配置初始化（exe 目录 setting.conf，读取或创建 + 内存缓存）
             win::config::init();
+            // 自启默认值：便携版不自动开启，安装版首次启动默认开启（用户关闭后不再干预）
+            win::autostart::apply_autostart_default();
             win::log::info("boot", "WinNas Launcher 启动");
 
             // 启动顺序：自愈检测 → 标记 running → 钩子 → 置顶/焦点 → 任务栏/电源
@@ -248,6 +256,8 @@ pub fn run() {
 
             win::taskbar::hide();
             win::power::keep_awake();
+            // 电源按钮操作设为「睡眠」（遥控器电源键 → S3 睡眠），退出时还原
+            win::power::set_power_button_sleep();
             win::log::info("boot", "启动完成");
             Ok(())
         })
@@ -284,6 +294,7 @@ pub fn run() {
         if let tauri::RunEvent::Exit = event {
             win::taskbar::restore();
             win::power::restore_power();
+            win::power::restore_power_button();
             win::focus::restore_foreground_lock_timeout();
             win::system_state::mark_clean();
             win::log::info("exit", "正常退出，已恢复系统状态");

@@ -25,7 +25,7 @@ fn resolve_icon_source(path: &str) -> String {
 }
 
 /// 用 IShellLink 解析 `.lnk` 指向的目标路径。
-fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
+pub fn resolve_lnk_target(lnk_path: &str) -> Option<String> {
     unsafe {
         // STA 初始化（S_OK=本次初始化 / S_FALSE=线程已初始化）；RPC_E_CHANGED_MODE 等错误则放弃
         let hr = CoInitializeEx(None, COINIT_APARTMENTTHREADED);

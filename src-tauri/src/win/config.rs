@@ -35,6 +35,9 @@ pub struct AppItem {
 pub struct Config {
     /// 开机自启
     pub autostart: bool,
+    /// 自启是否已初始化（安装版首次启动自动开启后置 true，用户显式切换后也置 true，避免反复自动干预）
+    #[serde(default)]
+    pub autostart_initialized: bool,
     /// Esc 退出是否弹确认框
     pub exit_confirm: bool,
     /// UI 缩放倍数（1.0 = 1920×1080 基准，见设计文档 5.6）
@@ -49,6 +52,7 @@ impl Default for Config {
     fn default() -> Self {
         Self {
             autostart: false,
+            autostart_initialized: false,
             exit_confirm: true,
             scale: 1.0,
             initialized: false,

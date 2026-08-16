@@ -711,6 +711,7 @@ function App() {
           break;
         case "Escape":
         case "Backspace":
+        case "BrowserBack":
           if (manageMode) {
             exitManageMode();
           } else {
