@@ -4,6 +4,8 @@
 
 开机直达全屏应用网格，用遥控器/键盘方向键操作，启动你的 Kodi、Jellyfin、播放器、游戏等，无需键鼠。
 
+**语言：** [中文](README.md) | [English](README.en.md)
+
 ## ✨ 特性
 
 - 🖥️ **无边框独占全屏** — 开机即全屏置顶，直达 Launcher，不看到 Windows 桌面
