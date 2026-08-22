@@ -56,6 +56,7 @@ function App() {
   const manualInputRef = useRef<HTMLInputElement>(null);
   const langListRef = useRef<HTMLDivElement>(null); // 语言弹窗滚动列表
   const scanListRef = useRef<HTMLDivElement>(null); // 添加 APP 扫描列表
+  const settingsDrawerRef = useRef<HTMLElement>(null); // 设置抽屉滚动列表
   const [settingsFocus, setSettingsFocus] = useState(0); // 设置抽屉内焦点索引
   const [clock, setClock] = useState(() => new Date());
   const [firstRun, setFirstRun] = useState(false); // 首次启动引导
@@ -140,6 +141,10 @@ function App() {
   useEffect(() => {
     if (showAddApp) scrollFocusedIntoView(scanListRef.current, ".scan-item.focused");
   }, [showAddApp, addAppFocus, scrollFocusedIntoView]);
+
+  useEffect(() => {
+    if (settingsOpen) scrollFocusedIntoView(settingsDrawerRef.current, ".drawer-item.focused");
+  }, [settingsOpen, settingsFocus, scrollFocusedIntoView]);
 
   const launch = useCallback(async (app: AppItem) => {
     setToast(t("toastLaunching", { name: app.name }));
@@ -977,7 +982,7 @@ function App() {
 
       {/* 右侧设置抽屉 */}
       {settingsOpen && (
-        <aside className="drawer">
+        <aside className="drawer" ref={settingsDrawerRef}>
           <h2>{t("settings")}</h2>
           <button
             className={`drawer-item ${settingsFocus === 0 ? "focused" : ""}`}

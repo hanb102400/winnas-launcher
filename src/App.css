@@ -248,7 +248,7 @@ body {
 
 /* ── 右侧设置抽屉 ───────────────────────── */
 .drawer {
-  position: absolute;
+  position: absolute; /* 已定位：作为 offsetParent，.drawer-item 的 offsetTop 相对它，供键盘滚动定位 */
   top: 0;
   right: 0;
   width: 380px;
@@ -260,6 +260,10 @@ body {
   flex-direction: column;
   gap: 14px;
   box-shadow: -12px 0 40px rgba(0, 0, 0, 0.5);
+  /* 低分辨率下 12 个菜单项会超出可视区：抽屉自身可滚动，配合
+     scrollFocusedIntoView 把焦点项自动滚入（遥控器没有滚轮） */
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .drawer h2 {
