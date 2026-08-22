@@ -49,11 +49,16 @@ unsafe extern "system" fn on_foreground(
     }
 
     // 置顶跟随焦点：Launcher 聚焦 → 置顶；失焦 → 取消置顶（让其他程序显示在最前）
+    // AppRunning 态（已启动外部程序）例外：即使 Launcher 拿到前台也不置顶 ——
+    // Playnite 等闪屏关闭瞬间前台会短暂回 Launcher，若此时置顶会把刚出现的主窗口压到下面，
+    // 造成「外部程序无法显示在最前」。外部程序全部退出回到 Idle 后才恢复置顶。
     let launcher = state::launcher_hwnd();
     if launcher != 0 {
         let lh = HWND(launcher as *mut _);
         if hwnd == lh {
-            window::topmost(lh);
+            if !state::app_running() {
+                window::topmost(lh);
+            }
         } else {
             window::not_topmost(lh);
         }
