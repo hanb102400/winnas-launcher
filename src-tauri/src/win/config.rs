@@ -46,6 +46,13 @@ pub struct Config {
     pub initialized: bool,
     /// 菜单模式："manual"（不加载，手动维护）| "all"（加载全部程序）
     pub menu_mode: String,
+    /// 界面语言 locale（空串 = 未初始化，首次启动自动检测系统语言，见 4.14）
+    #[serde(default)]
+    pub language: String,
+    /// 语言是否为系统自动检测所得（true = 跟随系统，OS 语言变化时自动校准；
+    /// false = 用户显式选择，永不覆盖）。用于修复旧版误判 + 区分用户选择。
+    #[serde(default)]
+    pub language_auto: bool,
 }
 
 impl Default for Config {
@@ -57,6 +64,8 @@ impl Default for Config {
             scale: 1.0,
             initialized: false,
             menu_mode: "manual".to_string(),
+            language: String::new(),
+            language_auto: false,
         }
     }
 }
@@ -93,7 +102,9 @@ fn atomic_write(path: &std::path::Path, data: &str) -> std::io::Result<()> {
 /// 启动时初始化：没有则创建默认配置并读取，有则直接读取，存入内存缓存。
 pub fn init() {
     let path = config_path();
-    let config = if path.exists() {
+    // 原始 JSON（用于判断旧版配置是否含 language_auto 字段，做一次性迁移）
+    let raw = fs::read_to_string(&path).ok();
+    let mut config = if path.exists() {
         match fs::read_to_string(&path).and_then(|s| Ok(serde_json::from_str::<Config>(&s)?)) {
             Ok(c) => {
                 log::info("config", &format!("读取配置 {}", path.display()));
@@ -115,7 +126,33 @@ pub fn init() {
         }
         config
     };
-    *CONFIG.write().unwrap() = Some(config);
+
+    // 语言处理（FR-20 / 设计文档 4.14）：
+    // - language 为空 → 首次启动，检测系统语言并标记 language_auto=true（跟随系统）
+    // - language_auto=true → 自动值，OS 语言变化时自动校准（含迁移修复旧版误判）
+    // - language_auto=false → 用户显式选择，永不覆盖
+    // - 旧版配置无 language_auto 字段 → 该语言只可能来自自动检测，视为自动并重新校准
+    let legacy_no_marker = raw
+        .as_deref()
+        .map(|s| !s.contains("\"language_auto\""))
+        .unwrap_or(false);
+
+    if config.language.is_empty() {
+        config.language = super::i18n::detect_os_language();
+        config.language_auto = true;
+        log::info("i18n", &format!("首次启动，按系统语言检测: {}", config.language));
+        save(&config); // 写内存缓存 + 文件
+    } else if config.language_auto || legacy_no_marker {
+        let detected = super::i18n::detect_os_language();
+        if detected != config.language {
+            log::info("i18n", &format!("按系统语言校准: {} -> {}", config.language, detected));
+            config.language = detected;
+        }
+        config.language_auto = true;
+        save(&config);
+    } else {
+        *CONFIG.write().unwrap() = Some(config);
+    }
 
     // 顺便加载菜单列表到内存缓存
     load_apps();

@@ -12,10 +12,14 @@ use std::time::Duration;
 use windows::Win32::Foundation::HWND;
 use windows::Win32::System::Threading::{AttachThreadInput, GetCurrentThreadId};
 use windows::Win32::UI::Accessibility::{SetWinEventHook, HWINEVENTHOOK};
+use windows::Win32::UI::Input::KeyboardAndMouse::{
+    keybd_event, KEYEVENTF_EXTENDEDKEY, KEYEVENTF_KEYUP, VK_MENU,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
-    GetForegroundWindow, GetWindowThreadProcessId, SetForegroundWindow, ShowWindow,
-    SystemParametersInfoW, EVENT_SYSTEM_FOREGROUND, SPI_GETFOREGROUNDLOCKTIMEOUT,
-    SPI_SETFOREGROUNDLOCKTIMEOUT, SPIF_SENDCHANGE, SW_RESTORE, WINEVENT_OUTOFCONTEXT,
+    GetForegroundWindow, GetWindowThreadProcessId, PeekMessageW, SetForegroundWindow, ShowWindow,
+    SystemParametersInfoW, MSG, EVENT_SYSTEM_FOREGROUND, PM_NOREMOVE,
+    SPI_GETFOREGROUNDLOCKTIMEOUT, SPI_SETFOREGROUNDLOCKTIMEOUT, SPIF_SENDCHANGE, SW_RESTORE,
+    WINEVENT_OUTOFCONTEXT,
 };
 
 use super::{state, window};
@@ -109,16 +113,40 @@ fn launcher_hwnd() -> Option<HWND> {
     }
 }
 
-/// 把 Launcher 带到最前并激活：恢复显示 + 置顶 + 挂接前台线程绕过前台锁定。
+/// 把 Launcher 带到最前并激活：恢复显示 + 置顶 + 绕过前台锁定。
+///
+/// Windows 对 `SetForegroundWindow` 有权限限制（本进程需「接收过最近输入 / 挂接前台线程
+/// 输入队列 / 前台锁定超时清零」之一），且前台窗口切换/忙碌时单次调用可能失败。
+/// 这里用「确保线程消息队列 + 挂接前台线程 + 验证 + 模拟 Alt 输入 + 重试」组合提高成功率：
+/// - `PeekMessageW(PM_NOREMOVE)` 强制创建本线程消息队列（spawn 线程队列是惰性创建，
+///   无队列时 `AttachThreadInput` 会失败——Home 键夺焦「时好时坏」的根因）；
+/// - 模拟一次 Alt 键按下/抬起，让系统认为本进程接收过用户输入，从而放行 `SetForegroundWindow`。
 fn bring_to_front(hwnd: HWND) {
     unsafe {
         let _ = ShowWindow(hwnd, SW_RESTORE);
         window::topmost(hwnd);
-        let fg_thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
-        let our_thread = GetCurrentThreadId();
-        let _ = AttachThreadInput(our_thread, fg_thread, true);
-        let _ = SetForegroundWindow(hwnd);
-        let _ = AttachThreadInput(our_thread, fg_thread, false);
+        // 前置：前台锁定超时清零（启动时已设，但其他程序可能改回，夺焦前重申）
+        let _ = SystemParametersInfoW(SPI_SETFOREGROUNDLOCKTIMEOUT, 0, None, SPIF_SENDCHANGE);
+
+        // 确保本线程有消息队列（无队列时 AttachThreadInput 失败）
+        let mut msg = MSG::default();
+        let _ = PeekMessageW(&mut msg, None, 0, 0, PM_NOREMOVE);
+
+        for _ in 0..3 {
+            let fg_thread = GetWindowThreadProcessId(GetForegroundWindow(), None);
+            let our_thread = GetCurrentThreadId();
+            let _ = AttachThreadInput(our_thread, fg_thread, true);
+            let _ = SetForegroundWindow(hwnd);
+            let _ = AttachThreadInput(our_thread, fg_thread, false);
+
+            if GetForegroundWindow() == hwnd {
+                return; // 已拿到前台
+            }
+            // 兜底：模拟 Alt 键按下/抬起，令系统认为本进程接收过用户输入后重试
+            keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_EXTENDEDKEY, 0);
+            keybd_event(VK_MENU.0 as u8, 0, KEYEVENTF_EXTENDEDKEY | KEYEVENTF_KEYUP, 0);
+            std::thread::sleep(Duration::from_millis(50));
+        }
     }
 }
 

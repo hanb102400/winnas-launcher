@@ -2,6 +2,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { open } from "@tauri-apps/plugin-dialog";
+import { t, getLang, setLang, LANGS } from "./i18n";
 import "./App.css";
 
 // 网格菜单应用项（对应 Rust config::AppItem）
@@ -17,22 +18,13 @@ interface Config {
   scale: number;
   initialized: boolean;
   menu_mode: string;
+  language: string;
 }
 
 // 网格规模（设计文档 5.2：6 列 × 4 行 = 24 项/页）
 const COLS = 6;
 const ROWS = 4;
 const PAGE_SIZE = COLS * ROWS;
-
-// 键位说明（M4-3，后续可重映射）
-const KEYMAP: { key: string; action: string }[] = [
-  { key: "↑ ↓ ← →", action: "移动焦点 / 翻页" },
-  { key: "Enter", action: "确认 / 启动" },
-  { key: "Esc / 退格", action: "返回" },
-  { key: "F1 / 菜单键", action: "打开设置" },
-  { key: "音量 + / -", action: "调节音量" },
-  { key: "静音键", action: "静音 / 取消静音" },
-];
 
 function App() {
   const [apps, setApps] = useState<AppItem[]>([]);
@@ -47,6 +39,8 @@ function App() {
   const [osdVisible, setOsdVisible] = useState(false);
   const [systemAction, setSystemAction] = useState<string | null>(null);
   const [showKeymap, setShowKeymap] = useState(false);
+  const [langPickerOpen, setLangPickerOpen] = useState(false);
+  const [langPickerFocus, setLangPickerFocus] = useState(0); // 0..9=语言项, 10=返回
   const [manageMode, setManageMode] = useState(false);
   const [manageTarget, setManageTarget] = useState<AppItem | null>(null);
   const [manageAction, setManageAction] = useState(0); // 0=删除 1=改名 2=移到最前 3=移到最后 4=取消
@@ -60,6 +54,8 @@ function App() {
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const renameInputRef = useRef<HTMLInputElement>(null);
   const manualInputRef = useRef<HTMLInputElement>(null);
+  const langListRef = useRef<HTMLDivElement>(null); // 语言弹窗滚动列表
+  const scanListRef = useRef<HTMLDivElement>(null); // 添加 APP 扫描列表
   const [settingsFocus, setSettingsFocus] = useState(0); // 设置抽屉内焦点索引
   const [clock, setClock] = useState(() => new Date());
   const [firstRun, setFirstRun] = useState(false); // 首次启动引导
@@ -108,6 +104,10 @@ function App() {
   useEffect(() => {
     (async () => {
       const config = await invoke<Config>("get_config");
+      // 应用界面语言（config.language 首次启动已由 Rust 按系统语言检测写回）
+      const lang = config.language || "zh-CN";
+      setLang(lang);
+      document.documentElement.dir = lang === "ar" ? "rtl" : "ltr";
       setAutostart(config.autostart);
       if (!config.initialized) {
         setFirstRun(true);
@@ -117,19 +117,47 @@ function App() {
     })().catch(() => {});
   }, []);
 
+  // 键盘/遥控器滚动：焦点超出列表可视区时自动滚入（遥控器没有滚轮）
+  // 依赖列表容器 position:relative，使 item.offsetTop 相对容器顶部，与 scrollTop 一致。
+  const scrollFocusedIntoView = useCallback((container: HTMLElement | null, selector: string) => {
+    if (!container) return;
+    const el = container.querySelector<HTMLElement>(selector);
+    if (!el) return;
+    const itemTop = el.offsetTop;
+    const itemBottom = itemTop + el.offsetHeight;
+    const visibleBottom = container.scrollTop + container.clientHeight;
+    if (itemBottom > visibleBottom) {
+      container.scrollTop = itemBottom - container.clientHeight;
+    } else if (itemTop < container.scrollTop) {
+      container.scrollTop = itemTop;
+    }
+  }, []);
+
+  useEffect(() => {
+    if (langPickerOpen) scrollFocusedIntoView(langListRef.current, ".lang-item.focused");
+  }, [langPickerOpen, langPickerFocus, scrollFocusedIntoView]);
+
+  useEffect(() => {
+    if (showAddApp) scrollFocusedIntoView(scanListRef.current, ".scan-item.focused");
+  }, [showAddApp, addAppFocus, scrollFocusedIntoView]);
+
   const launch = useCallback(async (app: AppItem) => {
-    setToast(`启动 ${app.name}...`);
+    setToast(t("toastLaunching", { name: app.name }));
     try {
       const pid = await invoke<number>("launch_app", { path: app.exe });
-      setToast(pid > 0 ? `${app.name} 已启动 (PID ${pid})` : `${app.name} 已启动`);
+      setToast(
+        pid > 0
+          ? t("toastLaunchedPid", { name: app.name, pid })
+          : t("toastLaunched", { name: app.name }),
+      );
     } catch (e) {
-      setToast(`启动失败: ${e}`);
+      setToast(t("toastLaunchFailed", { err: String(e) }));
     }
   }, []);
 
   const restoreDesktop = useCallback(async () => {
     await invoke("restore_desktop");
-    setToast("已恢复系统桌面状态");
+    setToast(t("toastRestored"));
     setSettingsOpen(false);
   }, []);
 
@@ -166,7 +194,7 @@ function App() {
       switch (manageAction) {
         case 0:
           list = await invoke<AppItem[]>("remove_app", { exe });
-          setToast(`已删除 ${manageTarget.name}`);
+          setToast(t("toastDeleted", { name: manageTarget.name }));
           break;
         case 1:
           // 改名：关闭操作菜单，进入改名输入状态
@@ -177,11 +205,11 @@ function App() {
           return;
         case 2:
           list = await invoke<AppItem[]>("move_app_to_front", { exe });
-          setToast(`已移到最前：${manageTarget.name}`);
+          setToast(t("toastMovedFront", { name: manageTarget.name }));
           break;
         case 3:
           list = await invoke<AppItem[]>("move_app_to_end", { exe });
-          setToast(`已移到最后：${manageTarget.name}`);
+          setToast(t("toastMovedEnd", { name: manageTarget.name }));
           break;
         default:
           list = apps;
@@ -190,7 +218,7 @@ function App() {
       // 删除收缩列表后夹紧焦点，避免 focusIndex 越界访问 undefined
       setFocusIndex((f) => Math.min(f, Math.max(0, list.length - 1)));
     } catch (e) {
-      setToast(`操作失败: ${e}`);
+      setToast(t("toastOpFailed", { err: String(e) }));
     }
     setManageTarget(null);
   }, [manageTarget, manageAction, apps]);
@@ -203,9 +231,9 @@ function App() {
     try {
       const list = await invoke<AppItem[]>("rename_app", { exe: renameTarget.exe, name });
       setApps(list);
-      setToast(`已重命名为 ${name}`);
+      setToast(t("toastRenamed", { name }));
     } catch (e) {
-      setToast(`改名失败: ${e}`);
+      setToast(t("toastRenameFailed", { err: String(e) }));
     }
     setRenaming(false);
     setRenameTarget(null);
@@ -216,11 +244,11 @@ function App() {
     if (maintenance) {
       await invoke("exit_maintenance");
       setMaintenance(false);
-      setToast("已退出维护模式");
+      setToast(t("toastExitMaintenance"));
     } else {
       await invoke("enter_maintenance");
       setMaintenance(true);
-      setToast("已进入维护模式（任务栏已恢复，可调试桌面）");
+      setToast(t("toastEnterMaintenance"));
     }
   }, [maintenance]);
 
@@ -263,7 +291,9 @@ function App() {
     const next = !autostart;
     const ok = await invoke<boolean>("set_autostart", { enabled: next });
     if (ok) setAutostart(next);
-    setToast(ok ? `开机自启已${next ? "开启" : "关闭"}` : "设置自启失败");
+    setToast(
+      ok ? (next ? t("toastAutostartOn") : t("toastAutostartOff")) : t("toastAutostartFailed"),
+    );
   }, [autostart]);
 
   const doExit = useCallback(() => {
@@ -272,18 +302,33 @@ function App() {
 
   // 首次启动引导选择
   const chooseMenu = useCallback(async (mode: string) => {
-    setToast(mode === "all" ? "正在扫描系统程序..." : "已选择不加载菜单");
+    setToast(mode === "all" ? t("toastScanning") : t("toastNoMenu"));
     try {
       const list = await invoke<AppItem[]>("init_menu", { mode });
       setApps(list);
       setFirstRun(false);
       setFocusIndex(0);
-      setToast(
-        mode === "all" ? `已加载 ${list.length} 个程序` : "网格为空，可通过设置添加应用",
-      );
+      setToast(mode === "all" ? t("toastLoaded", { count: list.length }) : t("toastEmptyMenu"));
     } catch (e) {
-      setToast(`初始化失败: ${e}`);
+      setToast(t("toastInitFailed", { err: String(e) }));
     }
+  }, []);
+
+  // 切换语言：持久化到 setting.conf 后整页重载应用新语言（FR-20 / 设计文档 5.9）
+  const changeLanguage = useCallback(async (code: string) => {
+    try {
+      const ok = await invoke<boolean>("set_language", { code });
+      if (!ok) {
+        setToast(t("toastOpFailed", { err: code }));
+        return;
+      }
+    } catch (e) {
+      setToast(t("toastOpFailed", { err: String(e) }));
+      return;
+    }
+    setLang(code);
+    setLangPickerOpen(false);
+    window.location.reload();
   }, []);
 
   // 打开添加 APP 页并扫描已安装程序
@@ -292,13 +337,13 @@ function App() {
     setSettingsOpen(false);
     setAddAppFocus(0);
     setScanList([]);
-    setToast("正在扫描已安装程序...");
+    setToast(t("toastScanningInstalled"));
     try {
       const list = await invoke<AppItem[]>("scan_apps");
       setScanList(list);
       setToast("");
     } catch (e) {
-      setToast(`扫描失败: ${e}`);
+      setToast(t("toastScanFailed", { err: String(e) }));
     }
   }, []);
 
@@ -309,9 +354,9 @@ function App() {
       setApps(list);
       setShowAddApp(false);
       setFocusIndex(0);
-      setToast(`已添加 ${app.name}`);
+      setToast(t("toastAdded", { name: app.name }));
     } catch (e) {
-      setToast(`添加失败: ${e}`);
+      setToast(t("toastAddFailed", { err: String(e) }));
     }
   }, []);
 
@@ -319,7 +364,7 @@ function App() {
   const addManualApp = useCallback(async () => {
     const p = manualPath.trim();
     if (!p) {
-      setToast("请输入程序路径");
+      setToast(t("toastEnterPath"));
       return;
     }
     const name = p.split(/[\\/]/).pop()?.replace(/\.(exe|lnk)$/i, "") || p;
@@ -332,14 +377,14 @@ function App() {
     try {
       const selected = await open({
         multiple: false,
-        filters: [{ name: "应用程序", extensions: ["exe", "lnk"] }],
+        filters: [{ name: t("fileFilterApps"), extensions: ["exe", "lnk"] }],
       });
       if (selected && typeof selected === "string") {
         const name = selected.split(/[\\/]/).pop()?.replace(/\.(exe|lnk)$/i, "") || selected;
         await addAppToGrid({ name, exe: selected, icon: "" });
       }
     } catch (e) {
-      setToast(`浏览失败: ${e}`);
+      setToast(t("toastBrowseFailed", { err: String(e) }));
     }
   }, [addAppToGrid]);
 
@@ -347,39 +392,46 @@ function App() {
   const executeSettings = useCallback(
     (idx: number) => {
       switch (idx) {
-        case 0:
+        case 0: {
+          // 语言（焦点默认落在当前语言项）
+          const cur = LANGS.findIndex((l) => l.code === getLang());
+          setLangPickerFocus(cur >= 0 ? cur : 0);
+          setLangPickerOpen(true);
+          break;
+        }
+        case 1:
           restoreDesktop();
           break;
-        case 1:
+        case 2:
           clearMenuCache();
           break;
-        case 2:
+        case 3:
           toggleAutostart();
           break;
-        case 3:
+        case 4:
           openAddApp();
           break;
-        case 4:
+        case 5:
           enterManageMode();
           break;
-        case 5:
+        case 6:
           setShowKeymap(true);
           break;
-        case 6:
+        case 7:
           setSystemAction("reboot");
           break;
-        case 7:
+        case 8:
           setSystemAction("sleep");
           break;
-        case 8:
+        case 9:
           setSystemAction("lock");
           break;
-        case 9:
+        case 10:
           setSettingsOpen(false);
           setConfirmExit(true);
           setConfirmFocus(0);
           break;
-        case 10:
+        case 11:
           setSettingsOpen(false);
           break;
       }
@@ -403,10 +455,12 @@ function App() {
 
   const actionLabel = (a: string) =>
     (
-      { shutdown: "关机", reboot: "重启", sleep: "睡眠", lock: "锁屏" } as Record<
-        string,
-        string
-      >
+      {
+        shutdown: t("actionShutdown"),
+        reboot: t("actionReboot"),
+        sleep: t("actionSleep"),
+        lock: t("actionLock"),
+      } as Record<string, string>
     )[a] || a;
 
   // 遥控/键盘焦点导航（二维网格 + 分页翻页，见设计文档 5.3）
@@ -592,11 +646,38 @@ function App() {
         return;
       }
 
+      // 语言选择弹窗：上下选择（0..9=语言项，10=返回），Enter 执行，Esc 关闭
+      if (langPickerOpen) {
+        const LAST = LANGS.length; // 返回项索引
+        switch (e.key) {
+          case "ArrowDown":
+            setLangPickerFocus((f) => Math.min(f + 1, LAST));
+            break;
+          case "ArrowUp":
+            setLangPickerFocus((f) => Math.max(f - 1, 0));
+            break;
+          case "Enter":
+            if (langPickerFocus < LAST) {
+              changeLanguage(LANGS[langPickerFocus].code);
+            } else {
+              setLangPickerOpen(false);
+            }
+            break;
+          case "Escape":
+          case "Backspace":
+          case "BrowserBack":
+            setLangPickerOpen(false);
+            break;
+        }
+        e.preventDefault();
+        return;
+      }
+
       // 设置抽屉打开：上下选择，Enter 执行，Esc 关闭
       if (settingsOpen) {
         switch (e.key) {
           case "ArrowDown":
-            setSettingsFocus((f) => Math.min(f + 1, 10));
+            setSettingsFocus((f) => Math.min(f + 1, 11));
             break;
           case "ArrowUp":
             setSettingsFocus((f) => Math.max(f - 1, 0));
@@ -682,6 +763,22 @@ function App() {
           }
           e.preventDefault();
           break;
+        case "PageDown":
+          // 下一页（保持同一行/列位置），末页无操作
+          if (pageIndex < pageCount - 1) {
+            const target = (pageIndex + 1) * PAGE_SIZE + row * COLS + col;
+            setFocusIndex(Math.min(target, apps.length - 1));
+          }
+          e.preventDefault();
+          break;
+        case "PageUp":
+          // 上一页（保持同一行/列位置），首页无操作
+          if (pageIndex > 0) {
+            const target = (pageIndex - 1) * PAGE_SIZE + row * COLS + col;
+            setFocusIndex(Math.min(target, apps.length - 1));
+          }
+          e.preventDefault();
+          break;
         case "ArrowUp":
           if (row > 0) {
             setFocusIndex(focusIndex - COLS);
@@ -737,6 +834,9 @@ function App() {
       systemAction,
       confirmSystemAction,
       showKeymap,
+      langPickerOpen,
+      langPickerFocus,
+      changeLanguage,
       showAddApp,
       scanList,
       addAppFocus,
@@ -771,8 +871,28 @@ function App() {
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [onKeyDown]);
 
+  // 全局禁用右键菜单：宿主级 WebView2 菜单已由 Rust 关闭，这里拦截 DOM 级
+  // contextmenu，兜底宿主设置生效前的空窗期与纯 DOM 触发的菜单
+  useEffect(() => {
+    const blockContextMenu = (e: MouseEvent) => e.preventDefault();
+    document.addEventListener("contextmenu", blockContextMenu, true);
+    return () =>
+      document.removeEventListener("contextmenu", blockContextMenu, true);
+  }, []);
+
   const hh = String(clock.getHours()).padStart(2, "0");
   const mm = String(clock.getMinutes()).padStart(2, "0");
+
+  // 按键说明表（随语言重渲染）
+  const KEYMAP: { key: string; action: string }[] = [
+    { key: "↑ ↓ ← →", action: t("keyMove") },
+    { key: "Page Up / Page Down", action: t("keyPage") },
+    { key: "Enter", action: t("keyConfirm") },
+    { key: "Esc / 退格", action: t("keyBack") },
+    { key: "F1 / 菜单键", action: t("keySettings") },
+    { key: "音量 + / -", action: t("keyVolume") },
+    { key: "静音键", action: t("keyMute") },
+  ];
 
   return (
     <div className="launcher">
@@ -799,7 +919,7 @@ function App() {
       {/* 中央网格菜单 */}
       <div className="stage">
         {apps.length === 0 ? (
-          <div className="empty-hint">暂无应用，按 F1 打开设置添加</div>
+          <div className="empty-hint">{t("emptyHint")}</div>
         ) : (
           <div className="grid">
             {pageApps.map((app, i) => {
@@ -838,11 +958,7 @@ function App() {
 
       {/* 提示条 */}
       <div className="hint">
-        {maintenance
-          ? "维护模式中 · 长按返回+菜单 5 秒退出"
-          : manageMode
-            ? "管理模式 · Enter 编辑 · 返回键退出"
-            : "← → ↑ ↓ 切换 · Enter 启动 · F1/菜单 设置"}
+        {maintenance ? t("hintMaintenance") : manageMode ? t("hintManage") : t("hintNormal")}
       </div>
 
       {/* Toast */}
@@ -862,109 +978,149 @@ function App() {
       {/* 右侧设置抽屉 */}
       {settingsOpen && (
         <aside className="drawer">
-          <h2>设置</h2>
+          <h2>{t("settings")}</h2>
           <button
             className={`drawer-item ${settingsFocus === 0 ? "focused" : ""}`}
-            onClick={restoreDesktop}
+            onClick={() => {
+              const cur = LANGS.findIndex((l) => l.code === getLang());
+              setLangPickerFocus(cur >= 0 ? cur : 0);
+              setLangPickerOpen(true);
+            }}
             onMouseEnter={() => setSettingsFocus(0)}
           >
-            🛠️ 一键恢复桌面状态
+            {t("languageEntry")}：{LANGS.find((l) => l.code === getLang())?.native ?? ""}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 1 ? "focused" : ""}`}
-            onClick={clearMenuCache}
+            onClick={restoreDesktop}
             onMouseEnter={() => setSettingsFocus(1)}
           >
-            🗑️ 清除桌面菜单缓存
+            {t("restoreDesktop")}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 2 ? "focused" : ""}`}
-            onClick={toggleAutostart}
+            onClick={clearMenuCache}
             onMouseEnter={() => setSettingsFocus(2)}
           >
-            🔁 开机自启：{autostart ? "开" : "关"}
+            {t("clearMenuCache")}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 3 ? "focused" : ""}`}
-            onClick={openAddApp}
+            onClick={toggleAutostart}
             onMouseEnter={() => setSettingsFocus(3)}
           >
-            ➕ 添加 APP
+            {t("autostart", { state: autostart ? t("autostartOn") : t("autostartOff") })}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 4 ? "focused" : ""}`}
-            onClick={enterManageMode}
+            onClick={openAddApp}
             onMouseEnter={() => setSettingsFocus(4)}
           >
-            🗂️ 管理 APP
+            {t("addApp")}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 5 ? "focused" : ""}`}
-            onClick={() => setShowKeymap(true)}
+            onClick={enterManageMode}
             onMouseEnter={() => setSettingsFocus(5)}
           >
-            ⌨️ 按键说明
+            {t("manageApp")}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 6 ? "focused" : ""}`}
-            onClick={() => setSystemAction("reboot")}
+            onClick={() => setShowKeymap(true)}
             onMouseEnter={() => setSettingsFocus(6)}
           >
-            🔄 重启
+            {t("keymapEntry")}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 7 ? "focused" : ""}`}
-            onClick={() => setSystemAction("sleep")}
+            onClick={() => setSystemAction("reboot")}
             onMouseEnter={() => setSettingsFocus(7)}
           >
-            💤 睡眠
+            {t("reboot")}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 8 ? "focused" : ""}`}
-            onClick={() => setSystemAction("lock")}
+            onClick={() => setSystemAction("sleep")}
             onMouseEnter={() => setSettingsFocus(8)}
           >
-            🔒 锁屏
+            {t("sleep")}
           </button>
           <button
             className={`drawer-item ${settingsFocus === 9 ? "focused" : ""}`}
+            onClick={() => setSystemAction("lock")}
+            onMouseEnter={() => setSettingsFocus(9)}
+          >
+            {t("lock")}
+          </button>
+          <button
+            className={`drawer-item ${settingsFocus === 10 ? "focused" : ""}`}
             onClick={() => {
               setSettingsOpen(false);
               setConfirmExit(true);
               setConfirmFocus(0);
             }}
-            onMouseEnter={() => setSettingsFocus(9)}
-          >
-            🚪 退出 Launcher
-          </button>
-          <button
-            className={`drawer-item ${settingsFocus === 10 ? "focused" : ""}`}
-            onClick={() => setSettingsOpen(false)}
             onMouseEnter={() => setSettingsFocus(10)}
           >
-            ← 返回
+            {t("exitLauncher")}
+          </button>
+          <button
+            className={`drawer-item ${settingsFocus === 11 ? "focused" : ""}`}
+            onClick={() => setSettingsOpen(false)}
+            onMouseEnter={() => setSettingsFocus(11)}
+          >
+            {t("back")}
           </button>
         </aside>
+      )}
+
+      {/* 语言选择弹窗 */}
+      {langPickerOpen && (
+        <div className="modal-overlay">
+          <div className="modal language">
+            <h2>{t("selectLanguage")}</h2>
+            <div className="lang-list" ref={langListRef}>
+              {LANGS.map((l, i) => (
+                <button
+                  key={l.code}
+                  className={`lang-item ${i === langPickerFocus ? "focused" : ""} ${l.code === getLang() ? "current" : ""}`}
+                  onClick={() => changeLanguage(l.code)}
+                  onMouseEnter={() => setLangPickerFocus(i)}
+                >
+                  <span className="lang-name">{l.native}</span>
+                  {l.code === getLang() && <span className="lang-check">✓</span>}
+                </button>
+              ))}
+            </div>
+            <button
+              className={`modal-btn ${langPickerFocus === LANGS.length ? "focused" : ""}`}
+              onClick={() => setLangPickerOpen(false)}
+              onMouseEnter={() => setLangPickerFocus(LANGS.length)}
+            >
+              {t("back")}
+            </button>
+          </div>
+        </div>
       )}
 
       {/* 退出确认框 */}
       {confirmExit && (
         <div className="modal-overlay">
           <div className="modal">
-            <h2>退出 WinNas Launcher？</h2>
-            <p>确认后将返回 Windows 桌面</p>
+            <h2>{t("exitTitle")}</h2>
+            <p>{t("exitDesc")}</p>
             <div className="modal-actions">
               <button
                 className={`modal-btn primary ${confirmFocus === 0 ? "focused" : ""}`}
                 onClick={doExit}
               >
-                确认退出
+                {t("confirmExit")}
               </button>
               <button
                 className={`modal-btn ${confirmFocus === 1 ? "focused" : ""}`}
                 onClick={() => setConfirmExit(false)}
               >
-                取消
+                {t("cancel")}
               </button>
             </div>
           </div>
@@ -975,21 +1131,21 @@ function App() {
       {systemAction && (
         <div className="modal-overlay">
           <div className="modal">
-            <h2>确认执行「{actionLabel(systemAction)}」？</h2>
+            <h2>{t("systemActionTitle", { action: actionLabel(systemAction) })}</h2>
             <div className="modal-actions">
               <button
                 className={`modal-btn primary ${confirmFocus === 0 ? "focused" : ""}`}
                 onClick={confirmSystemAction}
                 onMouseEnter={() => setConfirmFocus(0)}
               >
-                确认
+                {t("confirm")}
               </button>
               <button
                 className={`modal-btn ${confirmFocus === 1 ? "focused" : ""}`}
                 onClick={() => setSystemAction(null)}
                 onMouseEnter={() => setConfirmFocus(1)}
               >
-                取消
+                {t("cancel")}
               </button>
             </div>
           </div>
@@ -1000,7 +1156,7 @@ function App() {
       {showKeymap && (
         <div className="modal-overlay">
           <div className="modal keymap">
-            <h2>按键说明</h2>
+            <h2>{t("keymapTitle")}</h2>
             <div className="keymap-list">
               {KEYMAP.map((m) => (
                 <div key={m.key} className="keymap-row">
@@ -1010,7 +1166,7 @@ function App() {
               ))}
             </div>
             <button className="modal-btn" onClick={() => setShowKeymap(false)}>
-              ← 返回
+              {t("back")}
             </button>
           </div>
         </div>
@@ -1020,7 +1176,7 @@ function App() {
       {manageTarget && (
         <div className="modal-overlay">
           <div className="modal manage">
-            <h2>管理「{manageTarget.name}」</h2>
+            <h2>{t("manageTitle", { name: manageTarget.name })}</h2>
             <div className="manage-actions">
               <button
                 className={`modal-btn ${manageAction === 0 ? "focused" : ""}`}
@@ -1030,7 +1186,7 @@ function App() {
                 }}
                 onMouseEnter={() => setManageAction(0)}
               >
-                🗑️ 删除
+                {t("delete")}
               </button>
               <button
                 className={`modal-btn ${manageAction === 1 ? "focused" : ""}`}
@@ -1040,7 +1196,7 @@ function App() {
                 }}
                 onMouseEnter={() => setManageAction(1)}
               >
-                ✏️ 改名
+                {t("rename")}
               </button>
               <button
                 className={`modal-btn ${manageAction === 2 ? "focused" : ""}`}
@@ -1050,7 +1206,7 @@ function App() {
                 }}
                 onMouseEnter={() => setManageAction(2)}
               >
-                ⬆️ 移到最前
+                {t("moveFront")}
               </button>
               <button
                 className={`modal-btn ${manageAction === 3 ? "focused" : ""}`}
@@ -1060,14 +1216,14 @@ function App() {
                 }}
                 onMouseEnter={() => setManageAction(3)}
               >
-                ⬇️ 移到最后
+                {t("moveEnd")}
               </button>
               <button
                 className={`modal-btn ${manageAction === 4 ? "focused" : ""}`}
                 onClick={() => setManageTarget(null)}
                 onMouseEnter={() => setManageAction(4)}
               >
-                ← 取消
+                {t("cancel")}
               </button>
             </div>
           </div>
@@ -1078,7 +1234,7 @@ function App() {
       {renaming && renameTarget && (
         <div className="modal-overlay">
           <div className="modal">
-            <h2>重命名「{renameTarget.name}」</h2>
+            <h2>{t("renameTitle", { name: renameTarget.name })}</h2>
             <div className="manual-add">
               <input
                 ref={renameInputRef}
@@ -1103,7 +1259,7 @@ function App() {
                 onClick={confirmRename}
                 onMouseEnter={() => setRenameFocus(1)}
               >
-                确认
+                {t("confirm")}
               </button>
             </div>
             <button
@@ -1111,7 +1267,7 @@ function App() {
               onClick={() => setRenaming(false)}
               onMouseEnter={() => setRenameFocus(2)}
             >
-              ← 取消
+              {t("cancel")}
             </button>
           </div>
         </div>
@@ -1121,9 +1277,9 @@ function App() {
       {showAddApp && (
         <div className="modal-overlay">
           <div className="modal add-app">
-            <h2>添加 APP</h2>
-            <p>已安装程序（↑↓ 移动焦点，Enter 确认，Esc 返回）</p>
-            <div className="scan-list">
+            <h2>{t("addAppTitle")}</h2>
+            <p>{t("addAppHint")}</p>
+            <div className="scan-list" ref={scanListRef}>
               {scanList.map((app, i) => (
                 <button
                   key={`${app.exe}-${i}`}
@@ -1140,13 +1296,13 @@ function App() {
                   <span className="scan-name">{app.name}</span>
                 </button>
               ))}
-              {scanList.length === 0 && <div className="scan-empty">暂无扫描结果</div>}
+              {scanList.length === 0 && <div className="scan-empty">{t("noScanResult")}</div>}
             </div>
             <div className="manual-add">
               <input
                 ref={manualInputRef}
                 className={`manual-input ${addAppFocus === scanList.length ? "focused" : ""}`}
-                placeholder="或输入程序路径（exe/lnk）"
+                placeholder={t("manualPathPlaceholder")}
                 value={manualPath}
                 onChange={(e) => setManualPath(e.target.value)}
                 onFocus={() => setAddAppFocus(scanList.length)}
@@ -1172,7 +1328,7 @@ function App() {
                 onClick={addManualApp}
                 onMouseEnter={() => setAddAppFocus(scanList.length + 1)}
               >
-                添加
+                {t("add")}
               </button>
             </div>
             <button
@@ -1180,14 +1336,14 @@ function App() {
               onClick={browseFile}
               onMouseEnter={() => setAddAppFocus(scanList.length + 2)}
             >
-              📂 浏览文件...
+              {t("browseFile")}
             </button>
             <button
               className={`modal-btn ${addAppFocus === scanList.length + 3 ? "focused" : ""}`}
               onClick={() => setShowAddApp(false)}
               onMouseEnter={() => setAddAppFocus(scanList.length + 3)}
             >
-              ← 返回
+              {t("back")}
             </button>
           </div>
         </div>
@@ -1197,20 +1353,20 @@ function App() {
       {firstRun && (
         <div className="modal-overlay">
           <div className="modal first-run">
-            <h2>欢迎使用 WinNas Launcher</h2>
-            <p>请选择菜单初始化方式</p>
+            <h2>{t("welcomeTitle")}</h2>
+            <p>{t("welcomeDesc")}</p>
             <div className="modal-actions">
               <button
                 className={`modal-btn ${firstRunFocus === 0 ? "focused" : ""}`}
                 onClick={() => chooseMenu("manual")}
               >
-                不加载菜单
+                {t("noMenu")}
               </button>
               <button
                 className={`modal-btn primary ${firstRunFocus === 1 ? "focused" : ""}`}
                 onClick={() => chooseMenu("all")}
               >
-                加载全部菜单
+                {t("loadAllMenu")}
               </button>
             </div>
           </div>

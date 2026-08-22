@@ -30,6 +30,7 @@ base64 = "0.22"
 # windows crate 版本须与 tauri 2.11 依赖链一致 (0.61)，否则 HWND 类型不匹配
 windows = { version = "0.61", features = [
   "Win32_Foundation",
+  "Win32_Globalization",
   "Win32_Graphics_Gdi",
   "Win32_Media_Audio_Endpoints",
   "Win32_Security",

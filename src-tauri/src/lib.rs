@@ -49,6 +49,22 @@ fn get_config() -> win::config::Config {
     win::config::get()
 }
 
+/// 设置界面语言（前端 `invoke('set_language', { code })`，FR-20；选择后前端整页重载应用新语言）。
+/// 仅接受 10 种受支持 locale；成功返回 true。
+#[tauri::command]
+fn set_language(code: String) -> bool {
+    if !win::i18n::SUPPORTED.contains(&code.as_str()) {
+        win::log::info("i18n", &format!("非法语言代码: {code}"));
+        return false;
+    }
+    let mut config = win::config::get();
+    config.language = code.clone();
+    config.language_auto = false; // 用户显式选择，后续不再跟随系统语言
+    win::config::save(&config);
+    win::log::info("i18n", &format!("设置语言: {code}"));
+    true
+}
+
 /// 退出应用（前端 `invoke('exit_app')`，Esc 确认框确认后调用）。
 #[tauri::command]
 fn exit_app(app: tauri::AppHandle) {
@@ -248,10 +264,27 @@ pub fn run() {
             win::keyhook::start();
 
             if let Some(window) = app.get_webview_window("main") {
+                // 设置窗口/任务栏图标（bundle.icon 只嵌入 exe 图标，窗口图标需显式设置）
+                if let Some(icon) = app.default_window_icon() {
+                    let _ = window.set_icon(icon.clone());
+                }
                 let hwnd = window.hwnd()?;
                 // 全屏由 tauri.conf `fullscreen: true` 负责；这里只做置顶
                 win::window::topmost(hwnd);
                 win::focus::init(hwnd);
+
+                // 禁用 WebView2 默认右键菜单：遥控器「菜单键」= VK_APPS 0x5D，会触发宿主级右键
+                // 菜单，DOM 的 contextmenu preventDefault 拦不住，须在宿主层关闭。
+                // `with_webview` 排队到 UI 线程执行（WebView2 API 须在 UI/COM 线程调用）。
+                #[cfg(windows)]
+                let _ = window.with_webview(move |platform_webview| {
+                    let controller = platform_webview.controller();
+                    if let Ok(core) = unsafe { controller.CoreWebView2() } {
+                        if let Ok(settings) = unsafe { core.Settings() } {
+                            let _ = unsafe { settings.SetAreDefaultContextMenusEnabled(false) };
+                        }
+                    }
+                });
             }
 
             win::taskbar::hide();
@@ -267,6 +300,7 @@ pub fn run() {
             set_autostart,
             exit_app,
             get_config,
+            set_language,
             scan_apps,
             get_apps,
             add_app,

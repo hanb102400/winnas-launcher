@@ -4,6 +4,7 @@
 pub mod autostart;
 pub mod config;
 pub mod focus;
+pub mod i18n;
 pub mod icon;
 pub mod keyhook;
 pub mod log;
