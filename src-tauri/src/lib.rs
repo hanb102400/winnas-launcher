@@ -72,10 +72,11 @@ fn exit_app(app: tauri::AppHandle) {
     app.exit(0);
 }
 
-/// 扫描系统已安装程序（前端 `invoke('scan_apps')`，见 4.12；「添加 APP」页用全量扫描）。
+/// 扫描系统已安装程序（前端 `invoke('scan_apps')`，见 4.12）。
+/// 与首页首次「加载全部菜单」同一来源（开始菜单 `.lnk`），保证两个列表一致。
 #[tauri::command]
 fn scan_apps() -> Vec<win::config::AppItem> {
-    win::scanner::scan_full()
+    win::scanner::scan()
 }
 
 /// 读取网格菜单列表（前端 `invoke('get_apps')`）。
