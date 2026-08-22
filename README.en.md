@@ -187,6 +187,7 @@ These Windows apps **natively support full remote / gamepad operation** — no k
 |------|------|
 | [RetroArch](https://www.retroarch.com) | Multi-platform emulator frontend with tons of cores; XMB/Ozone interfaces navigable by gamepad/remote |
 | [EmulationStation DE](https://es-de.org) | Open-source, free emulator-only frontend; fullscreen box-art wall; native remote support (free LaunchBox alternative) |
+| [RetroBat](https://www.retrobat.org) | Windows emulation frontend with a built-in EmulationStation UI and auto-configured RetroArch + standalone emulators; fullscreen box-art wall, native remote/gamepad support |
 | [Dolphin](https://dolphin-emu.org) | GameCube / Wii emulator |
 | [PCSX2](https://pcsx2.net) | PS2 emulator |
 | [RPCS3](https://rpcs3.net) | PS3 emulator |

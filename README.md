@@ -187,6 +187,7 @@ winnas-launcher/
 |------|------|
 | [RetroArch](https://www.retroarch.com) | 多平台模拟器整合，海量核心，XMB/Ozone 界面手柄/遥控器导航 |
 | [EmulationStation DE](https://es-de.org) | 开源免费模拟器专用前端，全屏海报墙，原生遥控器（免费替代 LaunchBox） |
+| [RetroBat](https://www.retrobat.org) | Windows 模拟器整合前端，内置 EmulationStation 界面并自动配置 RetroArch 等核心，全屏海报墙，原生遥控器/手柄 |
 | [Dolphin](https://dolphin-emu.org) | NGC / Wii 模拟器 |
 | [PCSX2](https://pcsx2.net) | PS2 模拟器 |
 | [RPCS3](https://rpcs3.net) | PS3 模拟器 |
