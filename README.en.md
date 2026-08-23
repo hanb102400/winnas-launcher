@@ -29,12 +29,12 @@ Boots straight into a fullscreen app grid; navigate with your TV remote / keyboa
 
 ## 📦 Download & Install
 
-> **Latest release v0.1.1**:
+> **Latest release v0.1.2**:
 >
 > | Version | Download |
 > |------|------|
-> | Portable (recommended, extract and run) | [WinNas-Launcher-portable.zip](https://github.com/hanb102400/winnas-launcher/releases/download/v0.1.1/WinNas-Launcher-portable.zip) |
-> | Regular installer | [WinNas.Launcher_0.1.1_x64-setup.exe](https://github.com/hanb102400/winnas-launcher/releases/download/v0.1.1/WinNas.Launcher_0.1.1_x64-setup.exe) |
+> | Portable (recommended, extract and run) | [WinNas-Launcher-portable.zip](https://github.com/hanb102400/winnas-launcher/releases/download/v0.1.2/WinNas-Launcher-portable.zip) |
+> | Regular installer | [WinNas.Launcher_0.1.2_x64-setup.exe](https://github.com/hanb102400/winnas-launcher/releases/download/v0.1.2/WinNas.Launcher_0.1.2_x64-setup.exe) |
 >
 > Past releases on the [Releases page](https://github.com/hanb102400/winnas-launcher/releases).
 
@@ -47,7 +47,7 @@ The portable version **writes nothing to the registry or %APPDATA%**; config/log
 
 ### Option 2: Regular installer
 
-1. Download `WinNas.Launcher_0.1.1_x64-setup.exe`
+1. Download `WinNas.Launcher_0.1.2_x64-setup.exe`
 2. Double-click to install
 
 The installer version stores config in `%APPDATA%\WinNasLauncher\conf\`. If WebView2 Runtime is missing it will prompt to download it online (Win10/11 usually has it built in).
